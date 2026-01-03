@@ -3,7 +3,7 @@ import { Doctor, DaySchedule } from '../types';
 import { getDoctors, saveDoctor, deleteDoctor } from '../services/db';
 import { generateId, formatCurrency, fileToBase64 } from '../services/utils';
 import { getFileFromDisk } from '../services/storage';
-import { Plus, Trash2, Edit2, X, Upload, FileText, Image as ImageIcon, Download } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Upload, FileText, Image as ImageIcon, Download, Copy, Clock } from 'lucide-react';
 
 const Doctors: React.FC = () => {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
@@ -64,6 +64,50 @@ const Doctors: React.FC = () => {
     const newSchedule = [...(currentDoctor.schedule || createDefaultSchedule())];
     newSchedule[index] = { ...newSchedule[index], [field]: value };
     setCurrentDoctor({ ...currentDoctor, schedule: newSchedule });
+  };
+
+  const copyMonToWeekdays = () => {
+    if (!currentDoctor.schedule) return;
+    const mon = currentDoctor.schedule.find(d => d.day === 'Mon');
+    if (!mon) return;
+
+    const newSchedule = currentDoctor.schedule.map(d => {
+      if (['Tue', 'Wed', 'Thu', 'Fri'].includes(d.day)) {
+        return { ...d, startTime: mon.startTime, endTime: mon.endTime, isWorking: mon.isWorking };
+      }
+      return d;
+    });
+    setCurrentDoctor({ ...currentDoctor, schedule: newSchedule });
+  };
+
+  const calculateDuration = (start: string, end: string) => {
+    if (!start || !end) return 0;
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const diff = (eh * 60 + em) - (sh * 60 + sm);
+    return Math.max(0, diff / 60).toFixed(1);
+  };
+
+  const getBarStyles = (start: string, end: string) => {
+    if (!start || !end) return { left: '0%', width: '0%' };
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const startMins = sh * 60 + sm;
+    const endMins = eh * 60 + em;
+    
+    // Viewport: 06:00 to 22:00 (16 hours = 960 mins)
+    const viewStart = 6 * 60; 
+    const range = 16 * 60;
+
+    let left = ((startMins - viewStart) / range) * 100;
+    let width = ((endMins - startMins) / range) * 100;
+
+    // Clamp values
+    if (left < 0) { width += left; left = 0; }
+    if (width < 0) width = 0;
+    if (left + width > 100) width = 100 - left;
+
+    return { left: `${left}%`, width: `${width}%` };
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -236,52 +280,77 @@ const Doctors: React.FC = () => {
                 </div>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Weekly Schedule</label>
-                <div className="border rounded-lg overflow-hidden text-sm">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 text-gray-500">
-                      <tr>
-                        <th className="p-2 text-left w-20">Day</th>
-                        <th className="p-2 text-left">Working Hours</th>
-                        <th className="p-2 text-center w-24">Active</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {(currentDoctor.schedule || createDefaultSchedule()).map((day, idx) => (
-                        <tr key={day.day} className={day.isWorking ? 'bg-white' : 'bg-gray-50 text-gray-400'}>
-                          <td className="p-2 font-medium">{day.day}</td>
-                          <td className="p-2">
-                            <div className="flex items-center space-x-2">
-                              <input 
-                                type="time" 
-                                disabled={!day.isWorking}
-                                className="border rounded p-1"
-                                value={day.startTime}
-                                onChange={e => handleScheduleChange(idx, 'startTime', e.target.value)}
-                              />
-                              <span>to</span>
-                              <input 
-                                type="time" 
-                                disabled={!day.isWorking}
-                                className="border rounded p-1"
-                                value={day.endTime}
-                                onChange={e => handleScheduleChange(idx, 'endTime', e.target.value)}
-                              />
-                            </div>
-                          </td>
-                          <td className="p-2 text-center">
-                            <input 
-                              type="checkbox" 
-                              checked={day.isWorking} 
-                              onChange={e => handleScheduleChange(idx, 'isWorking', e.target.checked)}
-                              className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="bg-gray-50 p-5 rounded-lg border border-gray-200">
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-800">Weekly Schedule</label>
+                    <p className="text-xs text-gray-500">Set availability for appointments.</p>
+                  </div>
+                  <button type="button" onClick={copyMonToWeekdays} className="text-xs flex items-center text-primary hover:text-secondary font-medium">
+                     <Copy size={12} className="mr-1" />
+                     Copy Monday to M-F
+                  </button>
+                </div>
+                
+                <div className="space-y-3">
+                  {(currentDoctor.schedule || createDefaultSchedule()).map((day, idx) => (
+                    <div key={day.day} className="flex items-center bg-white p-3 rounded-md border border-gray-200 shadow-sm hover:border-blue-200 transition-colors">
+                      {/* Day Checkbox */}
+                      <label className="flex items-center w-28 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={day.isWorking}
+                          onChange={e => handleScheduleChange(idx, 'isWorking', e.target.checked)}
+                          className="h-5 w-5 text-primary rounded border-gray-300 focus:ring-primary mr-3"
+                        />
+                        <span className={`font-bold ${day.isWorking ? 'text-gray-800' : 'text-gray-400'}`}>{day.day}</span>
+                      </label>
+
+                      {/* Controls */}
+                      <div className={`flex-1 flex items-center ${day.isWorking ? 'opacity-100' : 'opacity-40 grayscale pointer-events-none'}`}>
+                         {/* Time Inputs */}
+                         <div className="flex items-center space-x-2 bg-gray-50 p-1 rounded border border-gray-200">
+                           <input
+                             type="time"
+                             value={day.startTime}
+                             onChange={e => handleScheduleChange(idx, 'startTime', e.target.value)}
+                             className="bg-transparent text-sm font-mono focus:outline-none w-20 text-center"
+                           />
+                           <span className="text-gray-400 text-xs">to</span>
+                           <input
+                             type="time"
+                             value={day.endTime}
+                             onChange={e => handleScheduleChange(idx, 'endTime', e.target.value)}
+                             className="bg-transparent text-sm font-mono focus:outline-none w-20 text-center"
+                           />
+                         </div>
+
+                         {/* Visual Bar */}
+                         <div className="flex-1 mx-4 h-3 bg-gray-100 rounded-full relative overflow-hidden hidden sm:block" title="Timeline: 06:00 to 22:00">
+                            {/* Visual grid lines for 8am, 12pm, 4pm, 8pm */}
+                            <div className="absolute top-0 bottom-0 left-[12.5%] border-r border-gray-200 w-px"></div>
+                            <div className="absolute top-0 bottom-0 left-[37.5%] border-r border-gray-200 w-px"></div>
+                            <div className="absolute top-0 bottom-0 left-[62.5%] border-r border-gray-200 w-px"></div>
+                            <div className="absolute top-0 bottom-0 left-[87.5%] border-r border-gray-200 w-px"></div>
+                            
+                            <div 
+                              className="absolute top-0 bottom-0 bg-gradient-to-r from-teal-400 to-teal-600 rounded-full shadow-sm transition-all duration-300 opacity-90"
+                              style={getBarStyles(day.startTime, day.endTime)}
+                            ></div>
+                         </div>
+
+                         {/* Duration Label */}
+                         <div className="w-16 text-right flex items-center justify-end text-xs text-gray-500 font-medium">
+                           <Clock size={12} className="mr-1 opacity-50" />
+                           {day.isWorking ? `${calculateDuration(day.startTime, day.endTime)}h` : '--'}
+                         </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 text-xs text-gray-400 flex justify-between px-2">
+                   <span>Visual timeline represents 06:00 to 22:00</span>
+                   <span>Adjust times using the inputs</span>
                 </div>
               </div>
 
