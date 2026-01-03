@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getAppointments, getDoctors, getPatients, getSettings, saveAppointment } from '../services/db';
-import { Appointment, AppointmentStatus, Role } from '../types';
-import { Users, Calendar, DollarSign, Activity, CheckCircle, Clock } from 'lucide-react';
+import { Appointment, AppointmentStatus, Role, Doctor, Patient } from '../types';
+import { Users, Calendar, DollarSign, Activity, CheckCircle, Clock, Play, AlertCircle, Stethoscope } from 'lucide-react';
 import { formatCurrency, sendEmail } from '../services/utils';
 import { useAuth } from '../context/AuthContext';
 import { addDays, isSameDay, parseISO, format } from 'date-fns';
@@ -24,14 +24,25 @@ const Dashboard: React.FC = () => {
   const [patientCount, setPatientCount] = useState(0);
   const [doctorCount, setDoctorCount] = useState(0);
   const [todayRevenue, setTodayRevenue] = useState(0);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
 
-  useEffect(() => {
+  // Time state for live updates
+  const [now, setNow] = useState(new Date());
+
+  // Refresh Logic
+  const refreshData = () => {
     const allApps = getAppointments();
-    const doctors = getDoctors();
-    const patients = getPatients();
+    const allDocs = getDoctors();
+    const allPats = getPatients();
     const settings = getSettings();
     
-    // 1. Run Auto-Reminder Logic
+    setDoctors(allDocs);
+    setPatients(allPats);
+    setPatientCount(allPats.length);
+    setDoctorCount(allDocs.length);
+
+    // 1. Run Auto-Reminder Logic (Once per session usually, but strictly safe here)
     if (settings.enableAutoReminders) {
       const tomorrow = addDays(new Date(), 1);
       
@@ -41,8 +52,8 @@ const Dashboard: React.FC = () => {
           app.status === AppointmentStatus.Scheduled &&
           isSameDay(parseISO(app.date), tomorrow)
         ) {
-          const pat = patients.find(p => p.id === app.patientId);
-          const doc = doctors.find(d => d.id === app.doctorId);
+          const pat = allPats.find(p => p.id === app.patientId);
+          const doc = allDocs.find(d => d.id === app.doctorId);
           
           if (pat && doc && pat.email) {
             let body = settings.emailTemplates.reminder;
@@ -54,7 +65,6 @@ const Dashboard: React.FC = () => {
             
             sendEmail(pat.email, `Appointment Reminder: ${app.date}`, body, 'Auto');
             
-            // Update appointment so we don't send twice
             app.reminderSent = true;
             saveAppointment(app);
           }
@@ -67,46 +77,74 @@ const Dashboard: React.FC = () => {
     if (user?.role === Role.Doctor && user.relatedId) {
       visibleApps = allApps.filter(a => a.doctorId === user.relatedId);
     }
-    
     setAppointments(visibleApps);
-    setPatientCount(patients.length);
-    setDoctorCount(doctors.length);
 
     const todayStr = new Date().toISOString().split('T')[0];
     const revenue = visibleApps
       .filter(a => a.date === todayStr && a.isPaid)
       .reduce((sum, a) => sum + (a.feeSnapshot || 0), 0);
     setTodayRevenue(revenue);
+    
+    setNow(new Date());
+  };
+
+  useEffect(() => {
+    refreshData();
+    // Auto-refresh dashboard every 30 seconds for live queue feel
+    const interval = setInterval(refreshData, 30000);
+    return () => clearInterval(interval);
   }, [user]);
 
+  const updateStatus = (app: Appointment, status: AppointmentStatus) => {
+    saveAppointment({ ...app, status });
+    refreshData();
+  };
+
   const todayStr = new Date().toISOString().split('T')[0];
-  const todaysAppointments = appointments.filter(a => a.date === todayStr).sort((a,b) => a.time.localeCompare(b.time));
+  const todaysAppointments = appointments
+    .filter(a => a.date === todayStr)
+    .sort((a,b) => (a.queueNumber || 999) - (b.queueNumber || 999));
+
+  const currentPatient = todaysAppointments.find(a => a.status === AppointmentStatus.InProgress);
+  const waitingPatients = todaysAppointments.filter(a => a.status === AppointmentStatus.CheckedIn || a.status === AppointmentStatus.Scheduled);
+  const completedPatients = todaysAppointments.filter(a => a.status === AppointmentStatus.Completed);
+
+  // Calculate Active Doctors
+  const currentDay = format(now, 'EEE'); // "Mon", "Tue"
+  const currentTimeStr = format(now, 'HH:mm'); // "14:30"
+
+  const activeDoctors = doctors.filter(doc => {
+    const schedule = doc.schedule.find(s => s.day === currentDay);
+    if (!schedule || !schedule.isWorking) return false;
+    return currentTimeStr >= schedule.startTime && currentTimeStr <= schedule.endTime;
+  });
 
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-gray-800">
-        Welcome back, {user?.name} 
-        <span className="text-sm font-normal text-gray-500 ml-2">({user?.role})</span>
+        Live Queue Dashboard
+        <span className="text-sm font-normal text-gray-500 ml-2">({new Date().toLocaleDateString()})</span>
       </h2>
       
+      {/* Top Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
-          title="Total Patients" 
-          value={patientCount} 
-          icon={<Users size={24} />} 
+          title="Patients Waiting" 
+          value={waitingPatients.length} 
+          icon={<Clock size={24} />} 
           color="bg-blue-500" 
         />
         <StatCard 
-          title="Doctors" 
-          value={doctorCount} 
-          icon={<Activity size={24} />} 
+          title="Completed Today" 
+          value={completedPatients.length} 
+          icon={<CheckCircle size={24} />} 
           color="bg-emerald-500" 
         />
         <StatCard 
-          title="My Schedule Today" 
-          value={todaysAppointments.length} 
-          icon={<Calendar size={24} />} 
-          color="bg-purple-500" 
+          title="Doctors Available" 
+          value={activeDoctors.length} 
+          icon={<Stethoscope size={24} />} 
+          color="bg-teal-500" 
         />
         {user?.role === Role.Admin && (
           <StatCard 
@@ -119,63 +157,184 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Today's Schedule</h3>
-          {todaysAppointments.length === 0 ? (
-            <p className="text-gray-500 italic">No appointments scheduled for today.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="text-sm text-gray-500 border-b border-gray-100">
-                    <th className="py-2">Time</th>
-                    <th className="py-2">Patient</th>
-                    <th className="py-2">Status</th>
+        
+        {/* Left Column: Live Queue Board */}
+        <div className="lg:col-span-2 space-y-6">
+          
+          {/* Current Serving Card */}
+          <div className="bg-white rounded-lg shadow-md border-l-4 border-primary overflow-hidden">
+            <div className="p-6">
+              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">Currently Serving</h3>
+              {currentPatient ? (
+                <div className="flex justify-between items-center">
+                   <div className="flex items-center space-x-6">
+                      <div className="bg-primary text-white text-5xl font-bold p-6 rounded-lg min-w-[120px] text-center shadow-inner">
+                        #{currentPatient.queueNumber}
+                      </div>
+                      <div>
+                        <h4 className="text-2xl font-bold text-gray-800 mb-1">{patients.find(p => p.id === currentPatient.patientId)?.name}</h4>
+                        <p className="text-lg text-primary">{doctors.find(d => d.id === currentPatient.doctorId)?.name}</p>
+                        <p className="text-sm text-gray-500 mt-1 flex items-center"><Clock size={14} className="mr-1"/> Appointment Time: {currentPatient.time}</p>
+                      </div>
+                   </div>
+                   <div className="flex flex-col space-y-2">
+                      <button 
+                        onClick={() => updateStatus(currentPatient, AppointmentStatus.Completed)}
+                        className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded shadow transition flex items-center justify-center"
+                      >
+                        <CheckCircle size={20} className="mr-2" /> Complete Visit
+                      </button>
+                   </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-10 text-gray-400">
+                  <Activity size={48} className="mr-4 opacity-50" />
+                  <span className="text-xl">No patient currently in consultation. Call the next one!</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Waiting List Table */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+               <h3 className="font-bold text-gray-800">Waiting Queue</h3>
+               <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{waitingPatients.length} Waiting</span>
+            </div>
+            
+            {waitingPatients.length === 0 ? (
+               <div className="p-8 text-center text-gray-500">Queue is empty.</div>
+            ) : (
+              <table className="w-full text-left">
+                <thead className="text-xs text-gray-500 bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-6 py-3">Queue #</th>
+                    <th className="px-6 py-3">Time</th>
+                    <th className="px-6 py-3">Patient</th>
+                    <th className="px-6 py-3">Doctor</th>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="text-sm">
-                  {todaysAppointments.map(app => (
-                    <tr key={app.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-3 font-mono text-gray-600">{app.time}</td>
-                      <td className="py-3 font-medium text-gray-800">{getPatients().find(p => p.id === app.patientId)?.name || 'Unknown'}</td>
-                      <td className="py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          app.status === AppointmentStatus.Completed ? 'bg-green-100 text-green-700' :
-                          app.status === AppointmentStatus.Cancelled ? 'bg-red-100 text-red-700' :
-                          'bg-blue-100 text-blue-700'
+                <tbody className="divide-y">
+                  {waitingPatients.map(app => (
+                    <tr key={app.id} className="hover:bg-gray-50 transition">
+                      <td className="px-6 py-4 font-bold text-lg text-primary">#{app.queueNumber}</td>
+                      <td className="px-6 py-4 font-mono text-sm">{app.time}</td>
+                      <td className="px-6 py-4 font-medium">{patients.find(p => p.id === app.patientId)?.name}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">{doctors.find(d => d.id === app.doctorId)?.name}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          app.status === AppointmentStatus.CheckedIn ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
                         }`}>
                           {app.status}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button 
+                           onClick={() => updateStatus(app, AppointmentStatus.InProgress)}
+                           className="text-white bg-primary hover:bg-secondary px-3 py-1 rounded text-xs flex items-center ml-auto"
+                           disabled={!!currentPatient && user?.role === Role.Doctor} 
+                        >
+                           <Play size={12} className="mr-1" /> Call In
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Quick Actions</h3>
-          <div className="space-y-3">
-            <a href="#/appointments" className="block w-full text-center py-2 px-4 bg-primary hover:bg-secondary text-white rounded transition shadow-sm">
-              New Appointment
-            </a>
-            <a href="#/patients" className="block w-full text-center py-2 px-4 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded transition">
-              Register Patient
-            </a>
-            <div className="pt-4 border-t border-gray-100">
-               <h4 className="text-sm font-medium text-gray-600 mb-2">System Status</h4>
-               <div className="flex items-center space-x-2 text-sm text-green-600">
-                 <CheckCircle size={16} />
-                 <span>Database Connected</span>
-               </div>
-               <div className="flex items-center space-x-2 text-sm text-green-600 mt-1">
-                 <Clock size={16} />
-                 <span>Auto-Reminders Active</span>
-               </div>
-            </div>
-          </div>
+        {/* Right Column: Quick Stats / Status */}
+        <div className="space-y-6">
+           
+           {/* Active Doctors */}
+           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4 flex items-center">
+                 <div className="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></div>
+                 Doctors On Duty
+              </h3>
+              {activeDoctors.length === 0 ? (
+                <div className="text-sm text-gray-500 italic bg-gray-50 p-3 rounded">
+                  No doctors are currently scheduled for this time ({currentTimeStr}).
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {activeDoctors.map(doc => {
+                    const sched = doc.schedule.find(s => s.day === currentDay);
+                    return (
+                      <div key={doc.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded transition border border-transparent hover:border-gray-100">
+                         <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-bold text-xs">
+                           {doc.name.substring(0,2).toUpperCase()}
+                         </div>
+                         <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-gray-800 truncate">{doc.name}</p>
+                            <p className="text-xs text-gray-500">{doc.specialty}</p>
+                         </div>
+                         <div className="text-right">
+                           <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full whitespace-nowrap">
+                             Until {sched?.endTime}
+                           </span>
+                         </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+           </div>
+
+           {/* System Health */}
+           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4">Clinic Status</h3>
+              <div className="space-y-4">
+                 <div className="flex items-center justify-between text-sm">
+                   <span className="text-gray-600">Reception</span>
+                   <span className="text-green-600 font-medium flex items-center"><CheckCircle size={14} className="mr-1"/> Online</span>
+                 </div>
+                 <div className="flex items-center justify-between text-sm">
+                   <span className="text-gray-600">Reminders Sent</span>
+                   <span className="font-bold">{appointments.filter(a => a.reminderSent).length}</span>
+                 </div>
+              </div>
+           </div>
+           
+           {/* Quick Actions */}
+           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+              <h3 className="font-bold text-gray-800 mb-4">Quick Actions</h3>
+              <div className="space-y-3">
+                <a href="#/appointments" className="block w-full text-center py-2 px-4 bg-primary hover:bg-secondary text-white rounded transition shadow-sm">
+                  Add to Queue
+                </a>
+                <a href="#/patients" className="block w-full text-center py-2 px-4 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded transition">
+                  Register New Patient
+                </a>
+              </div>
+           </div>
+
+           {/* Next 3 Scheduled (Future) */}
+           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+             <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase text-gray-400">Up Next (Later)</h3>
+             {todaysAppointments.filter(a => a.status === AppointmentStatus.Scheduled && a.time > currentTimeStr).slice(0, 3).length === 0 ? (
+                <p className="text-xs text-gray-400 italic">No more appointments later today.</p>
+             ) : (
+                <div className="space-y-3">
+                   {todaysAppointments
+                      .filter(a => a.status === AppointmentStatus.Scheduled && a.time > currentTimeStr)
+                      .slice(0, 3)
+                      .map(app => (
+                        <div key={app.id} className="flex items-center space-x-3 border-b border-gray-50 pb-2 last:border-0">
+                           <div className="bg-gray-100 text-gray-600 font-bold p-2 rounded text-xs">#{app.queueNumber}</div>
+                           <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{patients.find(p => p.id === app.patientId)?.name}</p>
+                              <p className="text-xs text-gray-500">{app.time}</p>
+                           </div>
+                        </div>
+                   ))}
+                </div>
+             )}
+           </div>
         </div>
       </div>
     </div>

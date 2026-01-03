@@ -7,7 +7,9 @@ export enum Gender {
 export enum Role {
   Admin = 'Admin',
   Receptionist = 'Receptionist',
-  Doctor = 'Doctor'
+  Doctor = 'Doctor',
+  Nurse = 'Nurse',
+  Billing = 'Billing'
 }
 
 export interface User {
@@ -19,6 +21,19 @@ export interface User {
   relatedId?: string; // If role is Doctor, this links to Doctor ID
 }
 
+export interface DoctorDocument {
+  name: string;
+  type: 'image' | 'pdf';
+  data: string; // Base64 string
+}
+
+export interface DaySchedule {
+  day: string; // "Mon", "Tue", etc.
+  startTime: string; // "09:00"
+  endTime: string; // "17:00"
+  isWorking: boolean;
+}
+
 export interface Doctor {
   id: string;
   name: string;
@@ -26,10 +41,11 @@ export interface Doctor {
   email: string;
   phone: string;
   consultationFee: number;
-  availableDays: string[]; // ["Mon", "Wed", "Fri"]
-  startHour: string; // "09:00"
-  endHour: string; // "17:00"
+  // Detailed schedule array instead of simple string arrays
+  schedule: DaySchedule[]; 
   bio?: string;
+  photo?: string; // Base64 string for profile picture
+  documents?: DoctorDocument[]; // Array of attached bio docs
 }
 
 export interface MedicalRecord {
@@ -46,6 +62,7 @@ export interface Patient {
   name: string;
   email: string;
   phone: string;
+  dateOfBirth?: string; // ISO Date YYYY-MM-DD
   age: number;
   gender: Gender;
   address: string;
@@ -54,6 +71,8 @@ export interface Patient {
 
 export enum AppointmentStatus {
   Scheduled = 'Scheduled',
+  CheckedIn = 'Checked In', // Patient arrived, waiting
+  InProgress = 'In Progress', // With Doctor
   Completed = 'Completed',
   Cancelled = 'Cancelled'
 }
@@ -69,10 +88,12 @@ export interface Appointment {
   isPaid: boolean;
   feeSnapshot: number; // Fee at the time of booking
   reminderSent?: boolean;
+  queueNumber?: number; // Daily sequential number (1, 2, 3...)
 }
 
 export interface AppSettings {
   clinicName: string;
+  logo?: string; // Base64 string for logo
   primaryColor: string;
   secondaryColor: string;
   enableAutoReminders: boolean;

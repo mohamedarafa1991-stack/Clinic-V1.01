@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Activity } from 'lucide-react';
 import { getSettings } from '../services/db';
+import { hashPassword } from '../services/utils';
+import { getFileFromDisk } from '../services/storage';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -11,10 +13,11 @@ const Login: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const settings = getSettings();
+  const logoSrc = getFileFromDisk(settings.logo);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (login(email, password)) {
+    if (login(email, hashPassword(password))) {
       navigate('/');
     } else {
       setError('Invalid username or password');
@@ -24,8 +27,14 @@ const Login: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center">
       <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md border-t-4 border-primary">
-        <div className="flex justify-center mb-6 text-primary">
-          <Activity size={48} />
+        <div className="flex justify-center mb-6">
+          <div className="w-20 h-20 flex items-center justify-center text-primary bg-gray-50 rounded-full border border-gray-100 p-2 overflow-hidden">
+             {logoSrc ? (
+               <img src={logoSrc} alt="Logo" className="w-full h-full object-contain" />
+             ) : (
+               <Activity size={40} />
+             )}
+          </div>
         </div>
         <h2 className="text-2xl font-bold text-center text-gray-800 mb-1">{settings.clinicName}</h2>
         <p className="text-center text-gray-500 mb-6">Clinic Management System</p>

@@ -87,7 +87,7 @@ const Finances: React.FC = () => {
         {/* Monthly Revenue Chart */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
           <h3 className="text-lg font-bold text-gray-800 mb-4">Monthly Revenue</h3>
-          <div className="h-64">
+          <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={monthlyRev}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -103,7 +103,7 @@ const Finances: React.FC = () => {
         {/* Doctor Performance Chart */}
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100">
           <h3 className="text-lg font-bold text-gray-800 mb-4">Revenue by Doctor</h3>
-          <div className="h-64 flex items-center justify-center">
+          <div className="h-64 w-full">
              <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie

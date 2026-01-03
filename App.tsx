@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { HashRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
@@ -9,7 +9,6 @@ import Finances from './pages/Finances';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import Login from './pages/Login';
-import { initializeDB } from './services/db';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Role } from './types';
 
@@ -37,10 +36,6 @@ const RoleRoute: React.FC<{ allowed: Role[], children: React.ReactNode }> = ({ a
 };
 
 const AppRoutes: React.FC = () => {
-  useEffect(() => {
-    initializeDB();
-  }, []);
-
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

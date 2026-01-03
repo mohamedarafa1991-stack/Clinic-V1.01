@@ -3,6 +3,7 @@ import { Patient, Gender, MedicalRecord } from '../types';
 import { getPatients, savePatient, deletePatient } from '../services/db';
 import { generateId } from '../services/utils';
 import { Plus, Trash2, Edit2, X, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { differenceInYears, parseISO } from 'date-fns';
 
 const Patients: React.FC = () => {
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -28,6 +29,7 @@ const Patients: React.FC = () => {
       email: currentPatient.email || '',
       phone: currentPatient.phone || '',
       age: Number(currentPatient.age) || 0,
+      dateOfBirth: currentPatient.dateOfBirth,
       gender: currentPatient.gender || Gender.Other,
       address: currentPatient.address || '',
       history: currentPatient.history || []
@@ -37,6 +39,18 @@ const Patients: React.FC = () => {
     setPatients(getPatients());
     setIsModalOpen(false);
     setCurrentPatient({});
+  };
+
+  const handleDateOfBirthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const dob = e.target.value;
+    let age = currentPatient.age;
+    
+    if (dob) {
+      // Calculate Age
+      age = differenceInYears(new Date(), parseISO(dob));
+    }
+    
+    setCurrentPatient({ ...currentPatient, dateOfBirth: dob, age });
   };
 
   const handleAddHistory = (patientId: string) => {
@@ -95,7 +109,7 @@ const Patients: React.FC = () => {
           <thead className="bg-gray-50 text-gray-500 text-sm font-medium">
             <tr>
               <th className="p-4">Name</th>
-              <th className="p-4">Age/Gender</th>
+              <th className="p-4">Age / DOB</th>
               <th className="p-4">Contact</th>
               <th className="p-4 text-center">History</th>
               <th className="p-4 text-right">Actions</th>
@@ -105,8 +119,11 @@ const Patients: React.FC = () => {
             {filteredPatients.map(pat => (
               <React.Fragment key={pat.id}>
                 <tr className="hover:bg-gray-50">
-                  <td className="p-4 font-medium text-gray-800">{pat.name}</td>
-                  <td className="p-4 text-gray-600">{pat.age} / {pat.gender}</td>
+                  <td className="p-4 font-medium text-gray-800">{pat.name} <br/> <span className="text-xs text-gray-400">{pat.gender}</span></td>
+                  <td className="p-4 text-gray-600">
+                     <span className="font-bold text-gray-800">{pat.age} Years</span>
+                     {pat.dateOfBirth && <div className="text-xs text-gray-400">Born: {pat.dateOfBirth}</div>}
+                  </td>
                   <td className="p-4 text-sm text-gray-600">
                     <div>{pat.phone}</div>
                     <div className="text-xs text-gray-400">{pat.email}</div>
@@ -182,11 +199,30 @@ const Patients: React.FC = () => {
                 <label className="block text-sm font-medium">Full Name</label>
                 <input required className={inputClass} value={currentPatient.name || ''} onChange={e => setCurrentPatient({...currentPatient, name: e.target.value})} />
               </div>
+              
               <div className="grid grid-cols-2 gap-4">
                  <div>
-                    <label className="block text-sm font-medium">Age</label>
-                    <input type="number" className={inputClass} value={currentPatient.age || ''} onChange={e => setCurrentPatient({...currentPatient, age: Number(e.target.value)})} />
+                    <label className="block text-sm font-medium">Date of Birth</label>
+                    <input 
+                      type="date" 
+                      className={inputClass} 
+                      value={currentPatient.dateOfBirth || ''} 
+                      onChange={handleDateOfBirthChange} 
+                    />
                  </div>
+                 <div>
+                    <label className="block text-sm font-medium">Age</label>
+                    <input 
+                      type="number" 
+                      className={`${inputClass} bg-gray-50`} 
+                      value={currentPatient.age || ''} 
+                      onChange={e => setCurrentPatient({...currentPatient, age: Number(e.target.value)})} 
+                      // Age is calculated but can be overridden if needed
+                    />
+                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                  <div>
                     <label className="block text-sm font-medium">Gender</label>
                     <select className={inputClass} value={currentPatient.gender} onChange={e => setCurrentPatient({...currentPatient, gender: e.target.value as Gender})}>
@@ -195,16 +231,14 @@ const Patients: React.FC = () => {
                       <option value={Gender.Other}>Other</option>
                     </select>
                  </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
                  <div>
                     <label className="block text-sm font-medium">Phone</label>
                     <input className={inputClass} value={currentPatient.phone || ''} onChange={e => setCurrentPatient({...currentPatient, phone: e.target.value})} />
                  </div>
-                 <div>
-                    <label className="block text-sm font-medium">Email</label>
-                    <input className={inputClass} value={currentPatient.email || ''} onChange={e => setCurrentPatient({...currentPatient, email: e.target.value})} />
-                 </div>
+              </div>
+              <div>
+                  <label className="block text-sm font-medium">Email</label>
+                  <input className={inputClass} value={currentPatient.email || ''} onChange={e => setCurrentPatient({...currentPatient, email: e.target.value})} />
               </div>
               <div>
                 <label className="block text-sm font-medium">Address</label>

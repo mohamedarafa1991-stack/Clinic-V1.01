@@ -1,9 +1,10 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Stethoscope, CalendarDays, DollarSign, Database, Activity, Mail, LogOut, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutDashboard, Users, Stethoscope, CalendarDays, DollarSign, Activity, Mail, LogOut, Settings as SettingsIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Role } from '../types';
 import { getSettings } from '../services/db';
+import { getFileFromDisk } from '../services/storage';
 
 const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -24,12 +25,20 @@ const Sidebar: React.FC = () => {
 
   if (!user) return null;
 
+  const logoSrc = getFileFromDisk(settings.logo);
+
   return (
     <div className="w-64 bg-primary text-white h-screen fixed left-0 top-0 flex flex-col shadow-xl z-50 transition-colors duration-300">
       <div className="p-6 flex items-center space-x-3 border-b border-white/20">
-        <Activity className="h-8 w-8 text-white" />
-        <div>
-          <h1 className="text-xl font-bold tracking-wide truncate max-w-[150px]">{settings.clinicName}</h1>
+        <div className="w-10 h-10 flex-shrink-0 flex items-center justify-center bg-white/10 rounded-lg overflow-hidden">
+          {logoSrc ? (
+            <img src={logoSrc} alt="Logo" className="w-full h-full object-contain" />
+          ) : (
+            <Activity className="h-6 w-6 text-white" />
+          )}
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold tracking-wide truncate">{settings.clinicName}</h1>
           <p className="text-xs text-teal-200">{user.role}</p>
         </div>
       </div>
@@ -45,7 +54,6 @@ const Sidebar: React.FC = () => {
           <span>Appointments</span>
         </NavLink>
         
-        {/* Only Admin and Receptionist can see all doctors management, Doctors see profile via separate logic or just limited */}
         {(user.role === Role.Admin || user.role === Role.Receptionist) && (
           <NavLink to="/doctors" className={linkClass}>
             <Stethoscope size={20} />
@@ -53,19 +61,21 @@ const Sidebar: React.FC = () => {
           </NavLink>
         )}
 
-        <NavLink to="/patients" className={linkClass}>
-          <Users size={20} />
-          <span>Patients</span>
-        </NavLink>
+        {user.role !== Role.Billing && (
+          <NavLink to="/patients" className={linkClass}>
+            <Users size={20} />
+            <span>Patients</span>
+          </NavLink>
+        )}
 
-        {(user.role === Role.Admin || user.role === Role.Receptionist) && (
+        {user.role !== Role.Billing && user.role !== Role.Doctor && (
           <NavLink to="/notifications" className={linkClass}>
             <Mail size={20} />
             <span>Notifications</span>
           </NavLink>
         )}
 
-        {user.role === Role.Admin && (
+        {(user.role === Role.Admin || user.role === Role.Billing) && (
           <NavLink to="/finances" className={linkClass}>
             <DollarSign size={20} />
             <span>Finances</span>
@@ -86,7 +96,7 @@ const Sidebar: React.FC = () => {
           <span>Logout</span>
         </button>
         <div className="text-xs text-teal-300 text-center mt-4">
-          v2.0.0 &copy; {new Date().getFullYear()} MediCore
+          v2.7.0 &copy; {new Date().getFullYear()} MediCore
         </div>
       </div>
     </div>

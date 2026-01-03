@@ -1,13 +1,13 @@
 import { NotificationLog } from "../types";
 import { saveNotification } from "./db";
-import { saveFileToDisk } from "./storage";
 
 export const generateId = (): string => {
   return Math.random().toString(36).substr(2, 9);
 };
 
+// Simple obfuscation (In a real app, use bcrypt on backend)
 export const hashPassword = (input: string): string => {
-  if (!input) return '';
+  // Simple Base64 + Reverse to prevent plain text reading in database
   return btoa(input.split('').reverse().join('')); 
 };
 
@@ -53,8 +53,10 @@ export const exportToCSV = (filename: string, rows: any[]) => {
   }
 };
 
+// Simulate Sending Email
 export const sendEmail = (recipient: string, subject: string, body: string, type: 'Auto' | 'Manual' = 'Manual') => {
   console.log(`%c Sending Email to ${recipient}: ${subject}`, 'color: cyan; font-weight: bold;');
+  
   const log: NotificationLog = {
     id: generateId(),
     date: new Date().toISOString(),
@@ -63,11 +65,22 @@ export const sendEmail = (recipient: string, subject: string, body: string, type
     message: body,
     type: type
   };
+  
   saveNotification(log);
   return true; 
 };
 
-// Updated: Saves to "Disk" and returns a path instead of Base64 string
-export const fileToBase64 = async (file: File): Promise<string> => {
-  return await saveFileToDisk(file);
+// File helper
+export const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    // Basic size validation (limit to 1.5MB to avoid localStorage quota issues)
+    if (file.size > 1500000) {
+      reject(new Error("File is too large (Max 1.5MB)"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
 };

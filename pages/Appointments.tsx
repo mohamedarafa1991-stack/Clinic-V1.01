@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Appointment, AppointmentStatus, Doctor, Patient, Role } from '../types';
-import { getAppointments, saveAppointment, getDoctors, getPatients } from '../services/db';
+import { getAppointments, saveAppointment, getDoctors, getPatients, getNextQueueNumber } from '../services/db';
 import { generateId, formatCurrency } from '../services/utils';
-import { Plus, Calendar, Clock, X, Filter } from 'lucide-react';
+import { Plus, Calendar, Clock, X, Filter, Hash, AlertCircle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 
@@ -24,9 +24,82 @@ const Appointments: React.FC = () => {
     isPaid: false
   });
 
+  // Time Slot State
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [slotStatus, setSlotStatus] = useState<string>('');
+
   useEffect(() => {
     refreshData();
   }, []);
+
+  // Update slots when Date or Doctor changes
+  useEffect(() => {
+    if (!isModalOpen) return;
+    
+    // Reset slots initially
+    setAvailableSlots([]);
+    setSlotStatus('');
+
+    if (!newApp.date || !newApp.doctorId) {
+      setSlotStatus('Please select a doctor and date first.');
+      return;
+    }
+
+    const doctor = doctors.find(d => d.id === newApp.doctorId);
+    if (!doctor) return;
+
+    // 1. Get Day of Week (Mon, Tue, etc.)
+    const dayOfWeek = format(parseISO(newApp.date), 'EEE');
+
+    // 2. Find Schedule for that day
+    const schedule = doctor.schedule.find(s => s.day === dayOfWeek);
+
+    if (!schedule || !schedule.isWorking) {
+      setSlotStatus(`Dr. ${doctor.name} is not available on ${dayOfWeek}s.`);
+      return;
+    }
+
+    // 3. Generate 30-min Slots
+    const slots: string[] = [];
+    const [startH, startM] = schedule.startTime.split(':').map(Number);
+    const [endH, endM] = schedule.endTime.split(':').map(Number);
+    
+    let currentMins = startH * 60 + startM;
+    const endMins = endH * 60 + endM;
+
+    while (currentMins < endMins) {
+      const h = Math.floor(currentMins / 60);
+      const m = currentMins % 60;
+      const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+      
+      // 4. Check Collision
+      const isTaken = appointments.some(a => 
+        a.doctorId === newApp.doctorId && 
+        a.date === newApp.date && 
+        a.time === timeStr && 
+        a.status !== AppointmentStatus.Cancelled &&
+        a.id !== newApp.id
+      );
+
+      if (!isTaken) {
+        slots.push(timeStr);
+      }
+      
+      currentMins += 30; // 30 Minute Interval
+    }
+
+    setAvailableSlots(slots);
+    
+    if (slots.length === 0) {
+      setSlotStatus('No available slots for this date.');
+    }
+
+    // Clear selected time if it's no longer valid
+    if (newApp.time && !slots.includes(newApp.time)) {
+      setNewApp(prev => ({ ...prev, time: '' }));
+    }
+
+  }, [newApp.date, newApp.doctorId, isModalOpen, doctors, appointments]);
 
   const refreshData = () => {
     const allApps = getAppointments();
@@ -39,7 +112,6 @@ const Appointments: React.FC = () => {
     // Filter appointments if user is a Doctor
     if (user?.role === Role.Doctor && user.relatedId) {
       setAppointments(allApps.filter(a => a.doctorId === user.relatedId));
-      // Auto-set doctor filter for new appointments
       setNewApp(prev => ({ ...prev, doctorId: user.relatedId }));
     } else {
       setAppointments(allApps);
@@ -50,7 +122,7 @@ const Appointments: React.FC = () => {
     e.preventDefault();
     if (!newApp.doctorId || !newApp.patientId || !newApp.date || !newApp.time) return;
 
-    // Double booking check
+    // Double booking check (Safeguard)
     const collision = appointments.find(a => 
       a.doctorId === newApp.doctorId && 
       a.date === newApp.date && 
@@ -60,11 +132,17 @@ const Appointments: React.FC = () => {
     );
 
     if (collision) {
-      alert('This doctor is already booked at this time!');
+      alert('Slot unavailable. Please refresh.');
       return;
     }
 
     const doc = doctors.find(d => d.id === newApp.doctorId);
+
+    // Auto-Assign Queue Number if new
+    let queueNumber = newApp.queueNumber;
+    if (!newApp.id && !queueNumber) {
+      queueNumber = getNextQueueNumber(newApp.date);
+    }
 
     const appToSave: Appointment = {
       id: newApp.id || generateId(),
@@ -76,7 +154,8 @@ const Appointments: React.FC = () => {
       isPaid: newApp.isPaid || false,
       feeSnapshot: doc ? doc.consultationFee : 0,
       notes: newApp.notes,
-      reminderSent: false
+      reminderSent: false,
+      queueNumber: queueNumber
     };
 
     saveAppointment(appToSave);
@@ -96,7 +175,6 @@ const Appointments: React.FC = () => {
   };
 
   const togglePaid = (app: Appointment) => {
-    // Doctors might not be allowed to mark payments in some clinics, but allowing for now.
     saveAppointment({ ...app, isPaid: !app.isPaid });
     refreshData();
   };
@@ -154,8 +232,9 @@ const Appointments: React.FC = () => {
       <div className="bg-white rounded-lg shadow border border-gray-200 flex-1 overflow-hidden flex flex-col">
         <div className="overflow-y-auto flex-1">
           <table className="w-full text-left">
-            <thead className="bg-gray-50 text-gray-500 text-sm font-medium sticky top-0">
+            <thead className="bg-gray-50 text-gray-500 text-sm font-medium sticky top-0 z-10">
               <tr>
+                <th className="p-4 w-20 text-center">#</th>
                 <th className="p-4">Date & Time</th>
                 <th className="p-4">Doctor</th>
                 <th className="p-4">Patient</th>
@@ -165,12 +244,17 @@ const Appointments: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredApps.length === 0 ? (
-                <tr><td colSpan={5} className="p-8 text-center text-gray-500">No appointments found.</td></tr>
+                <tr><td colSpan={6} className="p-8 text-center text-gray-500">No appointments found.</td></tr>
               ) : filteredApps.map(app => {
                 const doc = doctors.find(d => d.id === app.doctorId);
                 const pat = patients.find(p => p.id === app.patientId);
                 return (
                   <tr key={app.id} className="hover:bg-gray-50">
+                    <td className="p-4 text-center">
+                       {app.queueNumber ? (
+                         <span className="bg-primary text-white text-xs font-bold px-2 py-1 rounded-full">{app.queueNumber}</span>
+                       ) : <span className="text-gray-300">-</span>}
+                    </td>
                     <td className="p-4">
                       <div className="font-bold text-gray-800">{format(parseISO(app.date), 'MMM dd, yyyy')}</div>
                       <div className="text-sm text-gray-500 flex items-center space-x-1">
@@ -188,7 +272,6 @@ const Appointments: React.FC = () => {
                     <td className="p-4">
                       <div className="flex items-center space-x-2 mb-1">
                         <span className="font-mono text-sm">{formatCurrency(app.feeSnapshot)}</span>
-                        {/* Only Admin/Receptionist handle payment status usually, but keeping open for demo */}
                         <button 
                           onClick={() => togglePaid(app)} 
                           className={`text-xs px-2 py-0.5 rounded border ${app.isPaid ? 'bg-green-50 text-green-700 border-green-200' : 'bg-yellow-50 text-yellow-700 border-yellow-200'}`}
@@ -202,6 +285,8 @@ const Appointments: React.FC = () => {
                         className={`text-xs rounded p-1 border ${
                           app.status === AppointmentStatus.Scheduled ? 'text-blue-600 border-blue-200 bg-blue-50' :
                           app.status === AppointmentStatus.Completed ? 'text-green-600 border-green-200 bg-green-50' :
+                          app.status === AppointmentStatus.CheckedIn ? 'text-amber-600 border-amber-200 bg-amber-50' :
+                          app.status === AppointmentStatus.InProgress ? 'text-purple-600 border-purple-200 bg-purple-50' :
                           'text-red-600 border-red-200 bg-red-50'
                         }`}
                       >
@@ -230,6 +315,10 @@ const Appointments: React.FC = () => {
               <button onClick={() => setIsModalOpen(false)}><X size={24} className="text-gray-400" /></button>
             </div>
             <form onSubmit={handleSave} className="space-y-4">
+              <div className="bg-blue-50 p-3 rounded text-sm text-blue-800 flex items-center mb-2">
+                 <Hash size={16} className="mr-2" />
+                 Queue number will be automatically assigned for the selected date.
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                    <label className="block text-sm font-medium mb-1">Doctor</label>
@@ -260,8 +349,18 @@ const Appointments: React.FC = () => {
                    <input required type="date" className={inputClass} value={newApp.date || ''} onChange={e => setNewApp({...newApp, date: e.target.value})} />
                 </div>
                 <div>
-                   <label className="block text-sm font-medium mb-1">Time</label>
-                   <input required type="time" className={inputClass} value={newApp.time || ''} onChange={e => setNewApp({...newApp, time: e.target.value})} />
+                   <label className="block text-sm font-medium mb-1">Time Slot</label>
+                   {availableSlots.length > 0 ? (
+                      <select required className={inputClass} value={newApp.time || ''} onChange={e => setNewApp({...newApp, time: e.target.value})}>
+                        <option value="">Select Time...</option>
+                        {availableSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                   ) : (
+                      <div className="text-sm p-2 bg-red-50 text-red-600 rounded border border-red-200 flex items-center">
+                        <AlertCircle size={16} className="mr-2 flex-shrink-0" />
+                        <span>{slotStatus || 'Select Doctor & Date'}</span>
+                      </div>
+                   )}
                 </div>
               </div>
               <div>
