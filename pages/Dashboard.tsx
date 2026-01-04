@@ -1,35 +1,130 @@
 import React, { useEffect, useState } from 'react';
 import { getAppointments, getDoctors, getPatients, getSettings, saveAppointment } from '../services/db';
-import { Appointment, AppointmentStatus, Role, Doctor, Patient } from '../types';
-import { Users, Calendar, DollarSign, Activity, CheckCircle, Clock, Play, AlertCircle, Stethoscope } from 'lucide-react';
-import { formatCurrency, sendEmail } from '../services/utils';
+import { Appointment, AppointmentStatus, Role, Doctor, Patient, PaymentStatus } from '../types';
+import { DollarSign, Activity, CheckCircle, Clock, Play, Stethoscope, ChevronRight } from 'lucide-react';
+import { formatCurrency, sendEmail, isValidTransition } from '../services/utils';
 import { useAuth } from '../context/AuthContext';
 import { addDays, isSameDay, parseISO, format } from 'date-fns';
+import { useToast } from '../context/ToastContext';
 
 const StatCard: React.FC<{ title: string; value: string | number; icon: React.ReactNode; color: string }> = ({ title, value, icon, color }) => (
-  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex items-center space-x-4 transition hover:scale-105">
-    <div className={`p-3 rounded-full ${color} text-white shadow-md`}>
+  <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center space-x-4 transition hover:scale-105">
+    <div className={`p-3 rounded-xl ${color} text-white shadow-md`}>
       {icon}
     </div>
     <div>
-      <p className="text-sm text-gray-500 font-medium">{title}</p>
-      <h3 className="text-2xl font-bold text-gray-800">{value}</h3>
+      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{title}</p>
+      <h3 className="text-2xl font-black text-gray-800">{value}</h3>
     </div>
   </div>
 );
 
+const DoctorQueueCard: React.FC<{
+  doctor: Doctor;
+  currentPatient?: Appointment & { patientName?: string };
+  waitingList: (Appointment & { patientName?: string })[];
+  onStatusUpdate: (app: Appointment, status: AppointmentStatus) => void;
+  canOperate: boolean;
+}> = ({ doctor, currentPatient, waitingList, onStatusUpdate, canOperate }) => {
+  return (
+    <div className="bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden flex flex-col h-full animate-fade-in-up">
+      {/* Header */}
+      <div className="p-5 bg-gradient-to-r from-gray-50 to-white border-b border-gray-100 flex justify-between items-center">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-black text-sm">
+            {doctor.name.substring(0, 2).toUpperCase()}
+          </div>
+          <div>
+            <h4 className="font-bold text-gray-800 text-sm">{doctor.name}</h4>
+            <span className="text-[10px] font-bold text-primary uppercase tracking-widest">{doctor.specialty}</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <span className="block text-2xl font-black text-gray-800">{waitingList.length}</span>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Waiting</span>
+        </div>
+      </div>
+
+      {/* Active Area */}
+      <div className="p-6 bg-primary/5 flex-1 flex flex-col justify-center items-center text-center border-b border-gray-100 min-h-[180px]">
+        <h5 className="text-[10px] font-black text-primary/60 uppercase tracking-widest mb-4">Currently Serving</h5>
+        {currentPatient ? (
+          <div className="w-full animate-fade-in-up">
+            <div className="inline-block bg-white text-primary text-5xl font-black px-6 py-4 rounded-2xl shadow-sm mb-3">
+              #{currentPatient.queueNumber}
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 truncate px-4">{currentPatient.patientName}</h3>
+            <p className="text-xs font-medium text-gray-500 mb-4">{currentPatient.time}</p>
+            
+            {canOperate && (
+              <button 
+                onClick={() => onStatusUpdate(currentPatient, AppointmentStatus.Completed)}
+                className="bg-green-500 hover:bg-green-600 text-white px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg shadow-green-500/20 transition flex items-center justify-center mx-auto"
+              >
+                <CheckCircle size={16} className="mr-2" /> Complete Visit
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="text-gray-400 italic text-sm">
+            <Activity size={32} className="mx-auto mb-2 opacity-20" />
+            Station Idle
+          </div>
+        )}
+      </div>
+
+      {/* Waiting List */}
+      <div className="bg-white flex-1 overflow-y-auto max-h-[300px]">
+        {waitingList.length === 0 ? (
+          <div className="p-6 text-center text-xs font-bold text-gray-300 uppercase tracking-widest">Queue Empty</div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {waitingList.map(app => (
+              <div key={app.id} className="p-4 hover:bg-gray-50 transition flex items-center justify-between group">
+                <div className="flex items-center space-x-3">
+                  <span className="font-black text-gray-300 text-lg w-8">#{app.queueNumber}</span>
+                  <div>
+                    <p className="font-bold text-gray-700 text-sm">{app.patientName}</p>
+                    <p className="text-[10px] font-bold text-gray-400 flex items-center"><Clock size={10} className="mr-1"/> {app.time}</p>
+                  </div>
+                </div>
+                {canOperate && !currentPatient && app.status !== AppointmentStatus.CheckedIn && (
+                   <button 
+                     onClick={() => onStatusUpdate(app, AppointmentStatus.CheckedIn)}
+                     className="text-[10px] font-bold bg-gray-100 hover:bg-primary hover:text-white px-3 py-1.5 rounded-lg transition"
+                   >
+                     Check In
+                   </button>
+                )}
+                {canOperate && !currentPatient && app.status === AppointmentStatus.CheckedIn && (
+                   <button 
+                     onClick={() => onStatusUpdate(app, AppointmentStatus.InProgress)}
+                     className="text-[10px] font-bold bg-primary text-white px-3 py-1.5 rounded-lg shadow-md hover:bg-secondary transition flex items-center"
+                   >
+                     Call <ChevronRight size={12} className="ml-1"/>
+                   </button>
+                )}
+                {canOperate && currentPatient && (
+                  <span className="text-[10px] font-bold text-gray-300 uppercase">Wait</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
+  const { showToast } = useToast();
+  
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [patientCount, setPatientCount] = useState(0);
-  const [doctorCount, setDoctorCount] = useState(0);
   const [todayRevenue, setTodayRevenue] = useState(0);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
-
-  // Time state for live updates
-  const [now, setNow] = useState(new Date());
-
+  
   // Refresh Logic
   const refreshData = () => {
     const allApps = getAppointments();
@@ -39,13 +134,10 @@ const Dashboard: React.FC = () => {
     
     setDoctors(allDocs);
     setPatients(allPats);
-    setPatientCount(allPats.length);
-    setDoctorCount(allDocs.length);
 
-    // 1. Run Auto-Reminder Logic (Once per session usually, but strictly safe here)
+    // 1. Run Auto-Reminder Logic
     if (settings.enableAutoReminders) {
       const tomorrow = addDays(new Date(), 1);
-      
       allApps.forEach(app => {
         if (
           !app.reminderSent && 
@@ -64,7 +156,6 @@ const Dashboard: React.FC = () => {
                        .replace('{clinic_name}', settings.clinicName);
             
             sendEmail(pat.email, `Appointment Reminder: ${app.date}`, body, 'Auto');
-            
             app.reminderSent = true;
             saveAppointment(app);
           }
@@ -79,18 +170,16 @@ const Dashboard: React.FC = () => {
     }
     setAppointments(visibleApps);
 
+    // 3. Calc Revenue (Sum of amountPaid for today's appointments)
     const todayStr = new Date().toISOString().split('T')[0];
     const revenue = visibleApps
-      .filter(a => a.date === todayStr && a.isPaid)
-      .reduce((sum, a) => sum + (a.feeSnapshot || 0), 0);
+      .filter(a => a.date === todayStr)
+      .reduce((sum, a) => sum + (a.amountPaid || 0), 0);
     setTodayRevenue(revenue);
-    
-    setNow(new Date());
   };
 
   useEffect(() => {
     refreshData();
-    // Auto-refresh dashboard every 30 seconds for live queue feel
     const interval = setInterval(refreshData, 30000);
     return () => clearInterval(interval);
   }, [user]);
@@ -98,51 +187,55 @@ const Dashboard: React.FC = () => {
   const updateStatus = (app: Appointment, status: AppointmentStatus) => {
     saveAppointment({ ...app, status });
     refreshData();
+    showToast(`Status updated to ${status}`, 'success');
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
-  const todaysAppointments = appointments
-    .filter(a => a.date === todayStr)
-    .sort((a,b) => (a.queueNumber || 999) - (b.queueNumber || 999));
+  const todaysAppointments = appointments.filter(a => a.date === todayStr);
 
-  const currentPatient = todaysAppointments.find(a => a.status === AppointmentStatus.InProgress);
-  const waitingPatients = todaysAppointments.filter(a => a.status === AppointmentStatus.CheckedIn || a.status === AppointmentStatus.Scheduled);
-  const completedPatients = todaysAppointments.filter(a => a.status === AppointmentStatus.Completed);
+  const completedCount = todaysAppointments.filter(a => a.status === AppointmentStatus.Completed).length;
+  const waitingCount = todaysAppointments.filter(a => [AppointmentStatus.Scheduled, AppointmentStatus.CheckedIn].includes(a.status)).length;
 
-  // Calculate Active Doctors
-  const currentDay = format(now, 'EEE'); // "Mon", "Tue"
-  const currentTimeStr = format(now, 'HH:mm'); // "14:30"
-
-  const activeDoctors = doctors.filter(doc => {
-    const schedule = doc.schedule.find(s => s.day === currentDay);
-    if (!schedule || !schedule.isWorking) return false;
-    return currentTimeStr >= schedule.startTime && currentTimeStr <= schedule.endTime;
-  });
+  // Active Doctors Logic: Doctors who have appointments today or are scheduled to work
+  const activeDoctorIds = Array.from(new Set(todaysAppointments.map(a => a.doctorId)));
+  // Also include doctors who are scheduled today even if no appointments yet, for the view
+  const currentDayName = format(new Date(), 'EEE');
+  const scheduledDoctors = doctors.filter(d => d.schedule.some(s => s.day === currentDayName && s.isWorking)).map(d => d.id);
+  const relevantDoctorIds = Array.from(new Set([...activeDoctorIds, ...scheduledDoctors]));
+  
+  const relevantDoctors = doctors.filter(d => relevantDoctorIds.includes(d.id));
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-800">
-        Live Queue Dashboard
-        <span className="text-sm font-normal text-gray-500 ml-2">({new Date().toLocaleDateString()})</span>
-      </h2>
+    <div className="space-y-8 animate-fade-in-up pb-10">
+      <div className="flex justify-between items-end">
+        <div>
+          <h2 className="text-3xl font-black text-gray-800 tracking-tight">Clinical Operations</h2>
+          <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">{format(new Date(), 'EEEE, MMMM do, yyyy')}</span>
+        </div>
+        <div className="flex space-x-3">
+           <a href="#/appointments" className="bg-primary text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-primary/20 hover:bg-secondary transition flex items-center">
+             <Clock size={18} className="mr-2"/> Queue Patient
+           </a>
+        </div>
+      </div>
       
       {/* Top Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
-          title="Patients Waiting" 
-          value={waitingPatients.length} 
+          title="Total Waiting" 
+          value={waitingCount} 
           icon={<Clock size={24} />} 
           color="bg-blue-500" 
         />
         <StatCard 
-          title="Completed Today" 
-          value={completedPatients.length} 
+          title="Completed" 
+          value={completedCount} 
           icon={<CheckCircle size={24} />} 
           color="bg-emerald-500" 
         />
         <StatCard 
-          title="Doctors Available" 
-          value={activeDoctors.length} 
+          title="Active Clinics" 
+          value={relevantDoctors.length} 
           icon={<Stethoscope size={24} />} 
           color="bg-teal-500" 
         />
@@ -156,186 +249,43 @@ const Dashboard: React.FC = () => {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="mt-8">
+        <h3 className="text-xl font-black text-gray-800 mb-6 flex items-center">
+          <Activity size={24} className="mr-2 text-primary" /> Live Stations
+        </h3>
         
-        {/* Left Column: Live Queue Board */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Current Serving Card */}
-          <div className="bg-white rounded-lg shadow-md border-l-4 border-primary overflow-hidden">
-            <div className="p-6">
-              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-2">Currently Serving</h3>
-              {currentPatient ? (
-                <div className="flex justify-between items-center">
-                   <div className="flex items-center space-x-6">
-                      <div className="bg-primary text-white text-5xl font-bold p-6 rounded-lg min-w-[120px] text-center shadow-inner">
-                        #{currentPatient.queueNumber}
-                      </div>
-                      <div>
-                        <h4 className="text-2xl font-bold text-gray-800 mb-1">{patients.find(p => p.id === currentPatient.patientId)?.name}</h4>
-                        <p className="text-lg text-primary">{doctors.find(d => d.id === currentPatient.doctorId)?.name}</p>
-                        <p className="text-sm text-gray-500 mt-1 flex items-center"><Clock size={14} className="mr-1"/> Appointment Time: {currentPatient.time}</p>
-                      </div>
-                   </div>
-                   <div className="flex flex-col space-y-2">
-                      <button 
-                        onClick={() => updateStatus(currentPatient, AppointmentStatus.Completed)}
-                        className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded shadow transition flex items-center justify-center"
-                      >
-                        <CheckCircle size={20} className="mr-2" /> Complete Visit
-                      </button>
-                   </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center py-10 text-gray-400">
-                  <Activity size={48} className="mr-4 opacity-50" />
-                  <span className="text-xl">No patient currently in consultation. Call the next one!</span>
-                </div>
-              )}
-            </div>
+        {relevantDoctors.length === 0 ? (
+           <div className="bg-white rounded-3xl p-10 text-center border-2 border-dashed border-gray-200">
+             <p className="text-gray-400 font-bold">No active clinics or scheduled doctors for today.</p>
+           </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+            {relevantDoctors.map(doc => {
+              const docApps = todaysAppointments.filter(a => a.doctorId === doc.id);
+              const current = docApps.find(a => a.status === AppointmentStatus.InProgress);
+              const waiting = docApps
+                .filter(a => [AppointmentStatus.Scheduled, AppointmentStatus.CheckedIn].includes(a.status))
+                .sort((a,b) => (a.queueNumber || 999) - (b.queueNumber || 999))
+                .map(a => ({...a, patientName: patients.find(p => p.id === a.patientId)?.name || 'Unknown'}));
+              
+              const currentWithMeta = current ? {...current, patientName: patients.find(p => p.id === current.patientId)?.name || 'Unknown'} : undefined;
+              
+              // Only allow operations if Admin, Receptionist, or the specific Doctor
+              const canOperate = user?.role === Role.Admin || user?.role === Role.Receptionist || (user?.role === Role.Doctor && user.relatedId === doc.id);
+
+              return (
+                <DoctorQueueCard 
+                  key={doc.id}
+                  doctor={doc}
+                  currentPatient={currentWithMeta}
+                  waitingList={waiting}
+                  onStatusUpdate={updateStatus}
+                  canOperate={canOperate}
+                />
+              );
+            })}
           </div>
-
-          {/* Waiting List Table */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-               <h3 className="font-bold text-gray-800">Waiting Queue</h3>
-               <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">{waitingPatients.length} Waiting</span>
-            </div>
-            
-            {waitingPatients.length === 0 ? (
-               <div className="p-8 text-center text-gray-500">Queue is empty.</div>
-            ) : (
-              <table className="w-full text-left">
-                <thead className="text-xs text-gray-500 bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-6 py-3">Queue #</th>
-                    <th className="px-6 py-3">Time</th>
-                    <th className="px-6 py-3">Patient</th>
-                    <th className="px-6 py-3">Doctor</th>
-                    <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {waitingPatients.map(app => (
-                    <tr key={app.id} className="hover:bg-gray-50 transition">
-                      <td className="px-6 py-4 font-bold text-lg text-primary">#{app.queueNumber}</td>
-                      <td className="px-6 py-4 font-mono text-sm">{app.time}</td>
-                      <td className="px-6 py-4 font-medium">{patients.find(p => p.id === app.patientId)?.name}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600">{doctors.find(d => d.id === app.doctorId)?.name}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          app.status === AppointmentStatus.CheckedIn ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'
-                        }`}>
-                          {app.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button 
-                           onClick={() => updateStatus(app, AppointmentStatus.InProgress)}
-                           className="text-white bg-primary hover:bg-secondary px-3 py-1 rounded text-xs flex items-center ml-auto"
-                           disabled={!!currentPatient && user?.role === Role.Doctor} 
-                        >
-                           <Play size={12} className="mr-1" /> Call In
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-
-        {/* Right Column: Quick Stats / Status */}
-        <div className="space-y-6">
-           
-           {/* Active Doctors */}
-           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4 flex items-center">
-                 <div className="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse"></div>
-                 Doctors On Duty
-              </h3>
-              {activeDoctors.length === 0 ? (
-                <div className="text-sm text-gray-500 italic bg-gray-50 p-3 rounded">
-                  No doctors are currently scheduled for this time ({currentTimeStr}).
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {activeDoctors.map(doc => {
-                    const sched = doc.schedule.find(s => s.day === currentDay);
-                    return (
-                      <div key={doc.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded transition border border-transparent hover:border-gray-100">
-                         <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-bold text-xs">
-                           {doc.name.substring(0,2).toUpperCase()}
-                         </div>
-                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-gray-800 truncate">{doc.name}</p>
-                            <p className="text-xs text-gray-500">{doc.specialty}</p>
-                         </div>
-                         <div className="text-right">
-                           <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full whitespace-nowrap">
-                             Until {sched?.endTime}
-                           </span>
-                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-           </div>
-
-           {/* System Health */}
-           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4">Clinic Status</h3>
-              <div className="space-y-4">
-                 <div className="flex items-center justify-between text-sm">
-                   <span className="text-gray-600">Reception</span>
-                   <span className="text-green-600 font-medium flex items-center"><CheckCircle size={14} className="mr-1"/> Online</span>
-                 </div>
-                 <div className="flex items-center justify-between text-sm">
-                   <span className="text-gray-600">Reminders Sent</span>
-                   <span className="font-bold">{appointments.filter(a => a.reminderSent).length}</span>
-                 </div>
-              </div>
-           </div>
-           
-           {/* Quick Actions */}
-           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-              <h3 className="font-bold text-gray-800 mb-4">Quick Actions</h3>
-              <div className="space-y-3">
-                <a href="#/appointments" className="block w-full text-center py-2 px-4 bg-primary hover:bg-secondary text-white rounded transition shadow-sm">
-                  Add to Queue
-                </a>
-                <a href="#/patients" className="block w-full text-center py-2 px-4 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded transition">
-                  Register New Patient
-                </a>
-              </div>
-           </div>
-
-           {/* Next 3 Scheduled (Future) */}
-           <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-             <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase text-gray-400">Up Next (Later)</h3>
-             {todaysAppointments.filter(a => a.status === AppointmentStatus.Scheduled && a.time > currentTimeStr).slice(0, 3).length === 0 ? (
-                <p className="text-xs text-gray-400 italic">No more appointments later today.</p>
-             ) : (
-                <div className="space-y-3">
-                   {todaysAppointments
-                      .filter(a => a.status === AppointmentStatus.Scheduled && a.time > currentTimeStr)
-                      .slice(0, 3)
-                      .map(app => (
-                        <div key={app.id} className="flex items-center space-x-3 border-b border-gray-50 pb-2 last:border-0">
-                           <div className="bg-gray-100 text-gray-600 font-bold p-2 rounded text-xs">#{app.queueNumber}</div>
-                           <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{patients.find(p => p.id === app.patientId)?.name}</p>
-                              <p className="text-xs text-gray-500">{app.time}</p>
-                           </div>
-                        </div>
-                   ))}
-                </div>
-             )}
-           </div>
-        </div>
+        )}
       </div>
     </div>
   );

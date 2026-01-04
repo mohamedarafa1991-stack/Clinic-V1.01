@@ -1,3 +1,4 @@
+
 export enum Gender { Male = 'Male', Female = 'Female', Other = 'Other' }
 export enum Role { Admin = 'Admin', Receptionist = 'Receptionist', Doctor = 'Doctor', Nurse = 'Nurse', Billing = 'Billing' }
 

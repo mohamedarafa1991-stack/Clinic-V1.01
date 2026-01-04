@@ -1,280 +1,217 @@
-import { Doctor, Patient, Appointment, AppointmentStatus, Gender, User, Role, AppSettings, NotificationLog, DaySchedule } from '../types';
+import { Doctor, Patient, Appointment, User, Role, AppSettings, NotificationLog, AppointmentStatus, AppointmentType, PaymentStatus, Gender } from '../types';
 
-// Declare sql.js global type
 declare var initSqlJs: any;
-
 let db: any = null;
-const DB_NAME = 'MediCoreDB';
-const STORE_NAME = 'sqlite_store';
-const DB_KEY = 'sqlite_db_binary';
+const DB_NAME = 'MediCore_Relational_V5';
+const STORE_NAME = 'sqlite_binary_store';
+const DB_KEY = 'production_snapshot_v5';
 
-// --- IndexedDB Helper (Internal) ---
-// We use IndexedDB because it can hold 500MB+ vs LocalStorage's 5MB
+const DEFAULT_SPECIALTIES = [
+  "Anesthesiology", "Cardiology", "Dermatology", "Emergency Medicine", "Endocrinology",
+  "ENT (Otolaryngology)", "Gastroenterology", "General Practice", "General Surgery", 
+  "Geriatrics", "Hematology", "Infectious Diseases", "Internal Medicine", "Nephrology", 
+  "Neurology", "Obstetrics & Gynecology", "Oncology", "Ophthalmology", "Orthopedics", 
+  "Pediatrics", "Physical Medicine & Rehab", "Psychiatry", "Pulmonology", "Radiology", 
+  "Rheumatology", "Urology"
+].sort();
+
+const INITIAL_SETTINGS: AppSettings = {
+  clinicName: 'MediCore Clinical Center',
+  primaryColor: '#0f766e',
+  secondaryColor: '#0d9488',
+  enableAutoReminders: true,
+  specialties: DEFAULT_SPECIALTIES,
+  emailTemplates: {
+    reminder: "Dear {patient_name},\n\nThis is a friendly reminder for your appointment at {clinic_name} on {date} at {time} with {doctor_name}.\n\nPlease arrive 10 minutes early.",
+    followup: "Dear {patient_name},\n\nWe hope you are recovering well after your visit with {doctor_name}.\n\nPlease let us know if you have any further questions.\n\nBest regards,\n{clinic_name}"
+  }
+};
+
 const idbRequest = (method: 'get' | 'put', key: string, value?: any): Promise<any> => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    
+    const request = indexedDB.open(DB_NAME, 2);
     request.onupgradeneeded = (event: any) => {
       const db = event.target.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
+      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
     };
-
     request.onsuccess = (event: any) => {
       const db = event.target.result;
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      
-      let req;
-      if (method === 'get') req = store.get(key);
-      else req = store.put(value, key);
-
+      const req = method === 'get' ? store.get(key) : store.put(value, key);
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
-      
       tx.oncomplete = () => db.close();
     };
-
     request.onerror = () => reject(request.error);
   });
 };
 
-// SQL Schema Definitions
 const TABLES_SQL = `
-  CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, json_data TEXT);
-  CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT, email TEXT, password TEXT, role TEXT, relatedId TEXT);
-  CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, name TEXT, specialty TEXT, data_json TEXT);
-  CREATE TABLE IF NOT EXISTS patients (id TEXT PRIMARY KEY, name TEXT, phone TEXT, email TEXT, data_json TEXT);
-  CREATE TABLE IF NOT EXISTS appointments (id TEXT PRIMARY KEY, doctorId TEXT, patientId TEXT, date TEXT, time TEXT, status TEXT, isPaid INTEGER, data_json TEXT);
-  CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, date TEXT, recipient TEXT, type TEXT, data_json TEXT);
+  CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, data TEXT);
+  CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data TEXT);
+  CREATE TABLE IF NOT EXISTS doctors (id TEXT PRIMARY KEY, data TEXT);
+  CREATE TABLE IF NOT EXISTS patients (id TEXT PRIMARY KEY, data TEXT);
+  CREATE TABLE IF NOT EXISTS appointments (id TEXT PRIMARY KEY, data TEXT);
+  CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, data TEXT);
 `;
 
-// Robust Loader for sql-wasm.js
-const loadSqlJsScript = (): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    if (typeof initSqlJs !== 'undefined') {
-      resolve();
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js";
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load sql-wasm.js. Please check internet connection."));
-    document.head.appendChild(script);
-  });
-};
-
-// Initialize SQLite DB
 export const initializeDB = async () => {
   if (db) return;
-
   try {
-    // 1. Ensure Library Loaded (Fixes race condition)
-    await loadSqlJsScript();
-
-    // 2. Init SQL.js with WASM config
     const SQL = await initSqlJs({
       locateFile: (file: string) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
     });
 
-    // 3. Load DB from IndexedDB (Fixes storage quota issues)
     const savedUint8 = await idbRequest('get', DB_KEY);
+    db = savedUint8 ? new SQL.Database(savedUint8) : new SQL.Database();
     
-    if (savedUint8) {
-      try {
-        db = new SQL.Database(savedUint8);
-      } catch (e) {
-        console.error("DB Corrupt, recreating");
-        db = new SQL.Database();
-        db.run(TABLES_SQL);
-        seedDatabase();
-      }
-    } else {
-      db = new SQL.Database();
+    if (!savedUint8) {
       db.run(TABLES_SQL);
       seedDatabase();
     }
-
+    
     applyTheme();
-    console.log("SQLite Database Initialized via IndexedDB");
-  } catch (err) {
-    console.error("SQLite Init Error", err);
-    throw err;
+  } catch (error) {
+    console.error("Critical DB Init Error:", error);
+    throw error;
   }
 };
 
-// Persistence: Save to IndexedDB
 const persistDB = async () => {
   if (!db) return;
-  try {
-    const data = db.export(); // Uint8Array
-    await idbRequest('put', DB_KEY, data);
-  } catch (e) {
-    console.error("Failed to persist database", e);
-  }
+  const data = db.export(); 
+  await idbRequest('put', DB_KEY, data);
 };
 
-// --- Data Access Layer ---
-
-// Helper to sanitze params (undefined -> null) to prevent sql.js crash
-const sanitize = (params: any[]) => {
-  return params.map(p => (p === undefined ? null : p));
+const applyTheme = () => {
+  const s = getSettings();
+  document.documentElement.style.setProperty('--color-primary', s.primaryColor);
+  document.documentElement.style.setProperty('--color-secondary', s.secondaryColor);
 };
 
-const query = (sql: string, params: any[] = []) => {
+export const exportDatabaseBinary = (): Uint8Array => {
+  if (!db) throw new Error("DB Offline");
+  return db.export();
+};
+
+export const importDatabaseBinary = async (data: Uint8Array) => {
+  await idbRequest('put', DB_KEY, data);
+  window.location.reload();
+};
+
+const getAll = (table: string) => {
   if (!db) return [];
-  const stmt = db.prepare(sql);
-  stmt.bind(sanitize(params));
-  const result = [];
-  while (stmt.step()) {
-    result.push(stmt.getAsObject());
+  try {
+    const res = db.exec(`SELECT data FROM ${table}`);
+    return res.length > 0 ? res[0].values.map((v: any) => JSON.parse(v[0])) : [];
+  } catch (e) {
+    console.error(`Error fetching ${table}`, e);
+    return [];
   }
-  stmt.free();
-  return result;
 };
 
-const run = (sql: string, params: any[] = []) => {
+const saveItem = (table: string, id: string, item: any) => {
   if (!db) return;
-  db.run(sql, sanitize(params));
+  db.run(`INSERT OR REPLACE INTO ${table} (id, data) VALUES (?, ?)`, [id, JSON.stringify(item)]);
   persistDB();
 };
 
-// DOCTORS
-export const getDoctors = (): Doctor[] => {
-  const rows = query("SELECT data_json FROM doctors");
-  return rows.map((r: any) => JSON.parse(r.data_json));
-};
+export const getDoctors = (): Doctor[] => getAll('doctors');
+export const saveDoctor = (d: Doctor) => saveItem('doctors', d.id, d);
+export const deleteDoctor = (id: string) => { db.run(`DELETE FROM doctors WHERE id = ?`, [id]); persistDB(); };
 
-export const saveDoctor = (doc: Doctor) => {
-  const json = JSON.stringify(doc);
-  run("INSERT OR REPLACE INTO doctors (id, name, specialty, data_json) VALUES (?, ?, ?, ?)", [doc.id, doc.name, doc.specialty, json]);
-};
+export const getPatients = (): Patient[] => getAll('patients');
+export const savePatient = (p: Patient) => saveItem('patients', p.id, p);
+export const deletePatient = (id: string) => { db.run(`DELETE FROM patients WHERE id = ?`, [id]); persistDB(); };
 
-export const deleteDoctor = (id: string) => {
-  run("DELETE FROM doctors WHERE id = ?", [id]);
-};
+export const getAppointments = (): Appointment[] => getAll('appointments');
+export const saveAppointment = (a: Appointment) => saveItem('appointments', a.id, a);
+export const deleteAppointment = (id: string) => { db.run(`DELETE FROM appointments WHERE id = ?`, [id]); persistDB(); };
 
-// PATIENTS
-export const getPatients = (): Patient[] => {
-  const rows = query("SELECT data_json FROM patients");
-  return rows.map((r: any) => JSON.parse(r.data_json));
-};
+export const getUsers = (): User[] => getAll('users');
+export const saveUser = (u: User) => saveItem('users', u.id, u);
+export const deleteUser = (id: string) => { db.run(`DELETE FROM users WHERE id = ?`, [id]); persistDB(); };
 
-export const savePatient = (p: Patient) => {
-  const json = JSON.stringify(p);
-  run("INSERT OR REPLACE INTO patients (id, name, phone, email, data_json) VALUES (?, ?, ?, ?, ?)", [p.id, p.name, p.phone, p.email, json]);
-};
-
-export const deletePatient = (id: string) => {
-  run("DELETE FROM patients WHERE id = ?", [id]);
-};
-
-// APPOINTMENTS
-export const getAppointments = (): Appointment[] => {
-  const rows = query("SELECT data_json FROM appointments");
-  return rows.map((r: any) => JSON.parse(r.data_json));
-};
-
-export const saveAppointment = (a: Appointment) => {
-  const json = JSON.stringify(a);
-  const isPaidInt = a.isPaid ? 1 : 0;
-  run("INSERT OR REPLACE INTO appointments (id, doctorId, patientId, date, time, status, isPaid, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
-    [a.id, a.doctorId, a.patientId, a.date, a.time, a.status, isPaidInt, json]);
-};
-
-export const deleteAppointment = (id: string) => {
-  run("DELETE FROM appointments WHERE id = ?", [id]);
-};
-
-// USERS
-export const getUsers = (): User[] => {
-  return query("SELECT * FROM users");
-};
-
-export const saveUser = (u: User) => {
-  run("INSERT OR REPLACE INTO users (id, name, email, password, role, relatedId) VALUES (?, ?, ?, ?, ?, ?)", 
-    [u.id, u.name, u.email, u.password, u.role, u.relatedId]);
-};
-
-export const deleteUser = (id: string) => {
-  run("DELETE FROM users WHERE id = ?", [id]);
-};
-
-// SETTINGS
 export const getSettings = (): AppSettings => {
-  const res = query("SELECT json_data FROM settings WHERE id = 1");
-  if (res.length > 0) return JSON.parse(res[0].json_data);
+  if (!db) return INITIAL_SETTINGS;
+  const res = db.exec(`SELECT data FROM settings WHERE id = 1`);
+  if (res.length > 0) {
+    const data = JSON.parse(res[0].values[0][0]);
+    if (!data.specialties) data.specialties = DEFAULT_SPECIALTIES;
+    return data;
+  }
   return INITIAL_SETTINGS;
 };
+export const saveSettings = (s: AppSettings) => { saveItem('settings', '1', s); applyTheme(); };
 
-export const saveSettings = (s: AppSettings) => {
-  run("INSERT OR REPLACE INTO settings (id, json_data) VALUES (1, ?)", [JSON.stringify(s)]);
-  applyTheme();
-};
+export const getNotifications = (): NotificationLog[] => getAll('notifications');
+export const saveNotification = (n: NotificationLog) => saveItem('notifications', n.id, n);
 
-export const applyTheme = () => {
-  try {
-    const settings = getSettings();
-    document.documentElement.style.setProperty('--color-primary', settings.primaryColor);
-    document.documentElement.style.setProperty('--color-secondary', settings.secondaryColor);
-  } catch(e) {}
-}
-
-// NOTIFICATIONS
-export const getNotifications = (): NotificationLog[] => {
-  const rows = query("SELECT data_json FROM notifications ORDER BY date DESC");
-  return rows.map((r: any) => JSON.parse(r.data_json));
-};
-
-export const saveNotification = (log: NotificationLog) => {
-  run("INSERT INTO notifications (id, date, recipient, type, data_json) VALUES (?, ?, ?, ?, ?)", 
-    [log.id, log.date, log.recipientEmail, log.type, JSON.stringify(log)]);
-};
-
-// QUEUE
-export const getNextQueueNumber = (date: string): number => {
-  const res = query("SELECT data_json FROM appointments WHERE date = ?", [date]);
-  const apps = res.map((r: any) => JSON.parse(r.data_json) as Appointment);
-  if (apps.length === 0) return 1;
-  const max = Math.max(...apps.map(a => a.queueNumber || 0));
-  return max + 1;
+export const getNextQueueNumber = (date: string, doctorId?: string): number => {
+  let apps = getAppointments().filter(a => a.date === date);
+  // Separate queues per doctor to ensure distinct numbering
+  if (doctorId) {
+    apps = apps.filter(a => a.doctorId === doctorId);
+  }
+  return apps.length === 0 ? 1 : Math.max(...apps.map(a => a.queueNumber || 0)) + 1;
 };
 
 export const resetDatabase = () => {
-  // Clear IndexedDB
-  const req = indexedDB.deleteDatabase(DB_NAME);
-  req.onsuccess = () => window.location.reload();
-  req.onerror = () => window.location.reload();
-  localStorage.clear(); // Clear legacy
-};
-
-// SEEDING
-const INITIAL_SETTINGS: AppSettings = {
-  clinicName: 'MediCore Clinic',
-  primaryColor: '#0f766e',
-  secondaryColor: '#0d9488',
-  enableAutoReminders: true,
-  emailTemplates: {
-    reminder: "Dear {patient_name},\n\nThis is a reminder for your appointment with {doctor_name} on {date} at {time}.\n\nPlease arrive 10 minutes early.\n\nRegards,\n{clinic_name}",
-    followup: "Dear {patient_name},\n\nWe hope you are recovering well after your recent visit with {doctor_name}.\n\nPlease let us know if you have any questions.\n\nRegards,\n{clinic_name}"
-  }
+  indexedDB.deleteDatabase(DB_NAME);
+  window.location.reload();
 };
 
 const seedDatabase = () => {
   saveSettings(INITIAL_SETTINGS);
-  const users: User[] = [
-    { id: 'u1', name: 'Admin User', email: 'Admin', password: 'MzIxbmltZGE=', role: Role.Admin },
-    { id: 'u2', name: 'Receptionist', email: 'Reception', password: 'MzIxcmVzdQ==', role: Role.Receptionist },
-    { id: 'u3', name: 'Dr. Sarah Smith', email: 'Doctor', password: 'MzIxY29k', role: Role.Doctor, relatedId: 'd1' }
-  ];
-  users.forEach(u => saveUser(u));
-  const doctors: Doctor[] = [
+  
+  // Seed Users
+  saveUser({ id: 'u1', name: 'Super Admin', email: 'Admin', password: 'MzIxbmltZGE=', role: Role.Admin });
+  saveUser({ id: 'u2', name: 'Front Desk', email: 'Reception', password: 'MzIxcmVzdQ==', role: Role.Receptionist });
+
+  // Seed Doctors
+  const docs: Doctor[] = [
     {
-      id: 'd1', name: 'Dr. Sarah Smith', specialty: 'Cardiology', email: 'sarah@medicore.com', phone: '555-0101', consultationFee: 500,
-      schedule: [{day:'Mon',startTime:'09:00',endTime:'17:00',isWorking:true}, {day:'Tue',startTime:'09:00',endTime:'17:00',isWorking:true}, {day:'Wed',startTime:'09:00',endTime:'17:00',isWorking:true}, {day:'Thu',startTime:'09:00',endTime:'17:00',isWorking:true}, {day:'Fri',startTime:'09:00',endTime:'17:00',isWorking:true}, {day:'Sat',startTime:'09:00',endTime:'17:00',isWorking:false}, {day:'Sun',startTime:'09:00',endTime:'17:00',isWorking:false}],
+      id: 'd1', name: 'Dr. Sarah Mitchell', specialty: 'Cardiology', email: 'sarah.m@clinic.com', phone: '+20 100 234 5678', consultationFee: 500, bio: 'Senior cardiologist with 15 years experience in diagnostic cardiology.',
+      schedule: [
+        { day: 'Mon', startTime: '09:00', endTime: '14:00', isWorking: true },
+        { day: 'Wed', startTime: '09:00', endTime: '14:00', isWorking: true },
+        { day: 'Fri', startTime: '09:00', endTime: '14:00', isWorking: true },
+        { day: 'Tue', startTime: '09:00', endTime: '17:00', isWorking: false },
+        { day: 'Thu', startTime: '09:00', endTime: '17:00', isWorking: false },
+        { day: 'Sat', startTime: '09:00', endTime: '17:00', isWorking: false },
+        { day: 'Sun', startTime: '09:00', endTime: '17:00', isWorking: false }
+      ],
+      documents: []
+    },
+    {
+      id: 'd2', name: 'Dr. James Wilson', specialty: 'Pediatrics', email: 'j.wilson@clinic.com', phone: '+20 111 888 9999', consultationFee: 350, bio: 'Specializing in neonatal care and developmental pediatrics.',
+      schedule: [
+        { day: 'Tue', startTime: '10:00', endTime: '17:00', isWorking: true },
+        { day: 'Thu', startTime: '10:00', endTime: '17:00', isWorking: true },
+        { day: 'Mon', startTime: '09:00', endTime: '17:00', isWorking: false },
+        { day: 'Wed', startTime: '09:00', endTime: '17:00', isWorking: false },
+        { day: 'Fri', startTime: '09:00', endTime: '17:00', isWorking: false },
+        { day: 'Sat', startTime: '09:00', endTime: '17:00', isWorking: false },
+        { day: 'Sun', startTime: '09:00', endTime: '17:00', isWorking: false }
+      ],
       documents: []
     }
   ];
-  doctors.forEach(d => saveDoctor(d));
+  docs.forEach(d => saveDoctor(d));
+
+  // Seed Patients
+  const pats: Patient[] = [
+    { id: 'p1', name: 'John Doe', age: 45, dateOfBirth: '1979-05-15', gender: Gender.Male, phone: '+20 122 333 4444', email: 'john@example.com', address: '123 Nile St, Cairo', history: [{ id: 'h1', date: '2023-10-01', condition: 'Hypertension', treatment: 'Prescribed Lisinopril 10mg daily.', allergies: 'None', medications: 'Lisinopril' }] },
+    { id: 'p2', name: 'Emma Smith', age: 28, dateOfBirth: '1996-08-22', gender: Gender.Female, phone: '+20 155 666 7777', email: 'emma@example.com', address: '45 Pyramids Rd, Giza', history: [] }
+  ];
+  pats.forEach(p => savePatient(p));
+
+  // Seed Appointments
+  const today = new Date().toISOString().split('T')[0];
+  const apps: Appointment[] = [
+    { id: 'a1', doctorId: 'd1', patientId: 'p1', date: today, time: '09:00', status: AppointmentStatus.CheckedIn, type: AppointmentType.Consultation, totalFee: 500, amountPaid: 500, paymentStatus: PaymentStatus.Paid, queueNumber: 1, reminderSent: true },
+    { id: 'a2', doctorId: 'd2', patientId: 'p2', date: today, time: '10:30', status: AppointmentStatus.Scheduled, type: AppointmentType.FirstVisit, totalFee: 350, amountPaid: 0, paymentStatus: PaymentStatus.Pending, queueNumber: 1, reminderSent: false }
+  ];
+  apps.forEach(a => saveAppointment(a));
 };

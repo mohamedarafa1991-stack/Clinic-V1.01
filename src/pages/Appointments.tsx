@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Appointment, AppointmentStatus, AppointmentType, Doctor, Patient, Role, PaymentStatus } from '../types';
 import { getAppointments, saveAppointment, getDoctors, getPatients, getNextQueueNumber } from '../services/db';
 import { generateId, formatCurrency, getValidTransitions } from '../services/utils';
-import { Plus, Calendar, Clock, X, Filter, Hash, AlertCircle, Loader, ShieldAlert, CheckCircle } from 'lucide-react';
+import { Plus, Calendar, Clock, X, Filter, Hash, AlertCircle, Loader, ShieldAlert } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -188,9 +188,8 @@ const Appointments: React.FC = () => {
 
     // Auto-Assign Queue Number if new
     let queueNumber = newApp.queueNumber;
-    if (!newApp.id && !queueNumber && newApp.doctorId) {
-      // FIX: Use doctor-specific queue numbering
-      queueNumber = getNextQueueNumber(newApp.date, newApp.doctorId);
+    if (!newApp.id && !queueNumber) {
+      queueNumber = getNextQueueNumber(newApp.date);
     }
 
     const appToSave: Appointment = {
@@ -245,14 +244,14 @@ const Appointments: React.FC = () => {
     return true;
   }).sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
 
-  const inputClass = "w-full bg-white text-gray-900 border border-gray-200 p-2.5 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent focus:outline-none transition-shadow";
+  const inputClass = "w-full bg-white text-gray-900 border border-gray-300 p-2 rounded focus:ring-2 focus:ring-primary focus:border-transparent focus:outline-none";
 
   if (loading) {
       return <div className="h-full flex items-center justify-center text-primary"><Loader className="animate-spin mr-2" /> Loading Appointments...</div>;
   }
 
   return (
-    <div className="h-full flex flex-col animate-fade-in-up">
+    <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Appointment Scheduler</h2>
         <button 
@@ -269,7 +268,7 @@ const Appointments: React.FC = () => {
               setOverrideSchedule(false);
               setIsModalOpen(true);
           }}
-          className="bg-primary text-white px-4 py-2 rounded-xl flex items-center space-x-2 hover:bg-secondary shadow-sm transition-colors"
+          className="bg-primary text-white px-4 py-2 rounded flex items-center space-x-2 hover:bg-secondary shadow-sm"
         >
           <Plus size={18} />
           <span>New Appointment</span>
@@ -277,12 +276,12 @@ const Appointments: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6 flex space-x-4">
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100 mb-6 flex space-x-4">
         {user?.role !== Role.Doctor && (
           <div className="flex items-center space-x-2 flex-1">
             <Filter size={18} className="text-gray-400" />
             <select 
-              className="bg-white text-gray-900 border border-gray-200 rounded-lg p-2 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-primary"
+              className="bg-white text-gray-900 border border-gray-300 rounded p-2 text-sm flex-1 focus:outline-none focus:ring-1 focus:ring-primary"
               value={filterDoc}
               onChange={e => setFilterDoc(e.target.value)}
             >
@@ -295,74 +294,74 @@ const Appointments: React.FC = () => {
           <Calendar size={18} className="text-gray-400" />
           <input 
             type="date" 
-            className="bg-white text-gray-900 border border-gray-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            className="bg-white text-gray-900 border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             value={filterDate}
             onChange={e => setFilterDate(e.target.value)}
           />
-          {filterDate && <button onClick={() => setFilterDate('')} className="text-xs text-red-500 font-bold hover:underline">Clear</button>}
+          {filterDate && <button onClick={() => setFilterDate('')} className="text-xs text-red-500">Clear</button>}
         </div>
       </div>
 
       {/* Appointment List */}
-      <div className="bg-white rounded-2xl shadow border border-gray-200 flex-1 overflow-hidden flex flex-col">
+      <div className="bg-white rounded-lg shadow border border-gray-200 flex-1 overflow-hidden flex flex-col">
         <div className="overflow-y-auto flex-1">
           <table className="w-full text-left">
-            <thead className="bg-gray-50 text-gray-500 text-xs font-black uppercase tracking-wider sticky top-0 z-10 border-b border-gray-100">
+            <thead className="bg-gray-50 text-gray-500 text-sm font-medium sticky top-0 z-10">
               <tr>
-                <th className="p-5 w-20 text-center">Queue</th>
-                <th className="p-5">Time & Date</th>
-                <th className="p-5">Doctor</th>
-                <th className="p-5">Patient</th>
-                <th className="p-5">Status</th>
-                <th className="p-5 text-right">Fee & Payment</th>
+                <th className="p-4 w-20 text-center">#</th>
+                <th className="p-4">Date & Time</th>
+                <th className="p-4">Doctor</th>
+                <th className="p-4">Patient</th>
+                <th className="p-4">Type / Status</th>
+                <th className="p-4 text-right">Payment</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-gray-100">
               {filteredApps.length === 0 ? (
-                <tr><td colSpan={6} className="p-12 text-center text-gray-400 italic">No appointments match your filters.</td></tr>
+                <tr><td colSpan={6} className="p-8 text-center text-gray-500">No appointments found.</td></tr>
               ) : filteredApps.map(app => {
                 const doc = doctors.find(d => d.id === app.doctorId);
                 const pat = patients.find(p => p.id === app.patientId);
                 const allowedTransitions = getValidTransitions(app.status);
                 
                 return (
-                  <tr key={app.id} className="hover:bg-gray-50/80 transition-colors group">
-                    <td className="p-5 text-center cursor-pointer" onClick={() => editAppointment(app)}>
+                  <tr key={app.id} className="hover:bg-gray-50 group">
+                    <td className="p-4 text-center cursor-pointer" onClick={() => editAppointment(app)}>
                        {app.queueNumber ? (
-                         <span className="bg-primary/10 text-primary text-sm font-black px-3 py-1.5 rounded-lg">{app.queueNumber}</span>
+                         <span className="bg-primary text-white text-xs font-bold px-2 py-1 rounded-full">{app.queueNumber}</span>
                        ) : <span className="text-gray-300">-</span>}
                     </td>
-                    <td className="p-5 cursor-pointer" onClick={() => editAppointment(app)}>
-                      <div className="font-bold text-gray-800">{format(parseISO(app.date), 'MMM dd')}</div>
-                      <div className="text-xs text-gray-500 flex items-center font-mono mt-1">
-                        <Clock size={12} className="mr-1" /> {app.time}
+                    <td className="p-4 cursor-pointer" onClick={() => editAppointment(app)}>
+                      <div className="font-bold text-gray-800">{format(parseISO(app.date), 'MMM dd, yyyy')}</div>
+                      <div className="text-sm text-gray-500 flex items-center space-x-1">
+                        <Clock size={12} /> <span>{app.time}</span>
                       </div>
                     </td>
-                    <td className="p-5">
-                      <div className="font-bold text-gray-800 text-sm">{doc?.name || 'Unknown'}</div>
-                      <div className="text-[10px] uppercase font-bold text-teal-600 mt-0.5">{doc?.specialty}</div>
+                    <td className="p-4">
+                      <div className="font-medium text-gray-800">{doc?.name || 'Unknown'}</div>
+                      <div className="text-xs text-teal-600">{doc?.specialty}</div>
                     </td>
-                    <td className="p-5">
-                      <div className="font-bold text-gray-800 text-sm">{pat?.name || 'Unknown'}</div>
-                      <div className="text-xs text-gray-400">{pat?.phone}</div>
+                    <td className="p-4">
+                      <div className="font-medium text-gray-800">{pat?.name || 'Unknown'}</div>
+                      <div className="text-xs text-gray-500">{pat?.phone}</div>
                     </td>
-                    <td className="p-5">
-                      <div className="text-[10px] uppercase font-bold text-gray-400 mb-1.5 tracking-wide">{app.type}</div>
+                    <td className="p-4">
+                      <div className="text-xs text-gray-500 font-semibold mb-1 uppercase tracking-wide">{app.type}</div>
                       
                       {/* Robust Status Dropdown */}
                       <div className="flex items-center">
-                        <div className={`w-2.5 h-2.5 rounded-full mr-2 ${
+                        <div className={`w-2 h-2 rounded-full mr-2 ${
                             app.status === AppointmentStatus.Scheduled ? 'bg-blue-500' :
                             app.status === AppointmentStatus.CheckedIn ? 'bg-amber-500' :
                             app.status === AppointmentStatus.InProgress ? 'bg-purple-500' :
-                            app.status === AppointmentStatus.Completed ? 'bg-emerald-500' :
+                            app.status === AppointmentStatus.Completed ? 'bg-green-500' :
                             'bg-red-500'
                         }`}></div>
                         <select 
                           value={app.status}
                           onChange={(e) => handleStatusChange(app, e.target.value as AppointmentStatus)}
-                          className={`text-xs rounded-md py-1 px-2 border font-bold focus:ring-1 focus:ring-primary focus:outline-none cursor-pointer bg-white text-gray-700 hover:border-gray-300 transition-colors
-                             ${app.status === AppointmentStatus.Completed ? 'opacity-70 bg-gray-50' : ''}
+                          className={`text-xs rounded p-1 border font-medium focus:ring-1 focus:ring-primary focus:outline-none cursor-pointer
+                             ${app.status === AppointmentStatus.Completed ? 'bg-gray-50 text-gray-500' : 'bg-white text-gray-800'}
                           `}
                         >
                           <option value={app.status}>{app.status}</option>
@@ -374,16 +373,19 @@ const Appointments: React.FC = () => {
                         </select>
                       </div>
                     </td>
-                    <td className="p-5 text-right">
+                    <td className="p-4 text-right">
                        <div className="flex flex-col items-end cursor-pointer" onClick={() => editAppointment(app)}>
-                         <span className="font-mono text-sm font-black text-gray-700">{formatCurrency(app.totalFee)}</span>
-                         <span className={`text-[10px] px-2 py-0.5 rounded border font-bold uppercase mt-1 ${
-                            app.paymentStatus === PaymentStatus.Paid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
+                         <span className="font-mono text-sm font-bold text-gray-800">{formatCurrency(app.totalFee)}</span>
+                         <span className={`text-xs px-2 py-0.5 rounded border mt-1 ${
+                            app.paymentStatus === PaymentStatus.Paid ? 'bg-green-50 text-green-700 border-green-200' : 
                             app.paymentStatus === PaymentStatus.Partial ? 'bg-orange-50 text-orange-700 border-orange-200' :
                             'bg-red-50 text-red-700 border-red-200'
                          }`}>
-                           {app.paymentStatus}
+                           {app.paymentStatus.toUpperCase()}
                          </span>
+                         {app.paymentStatus === PaymentStatus.Partial && (
+                             <span className="text-[10px] text-gray-400 mt-1">Paid: {formatCurrency(app.amountPaid)}</span>
+                         )}
                        </div>
                     </td>
                   </tr>
@@ -396,47 +398,36 @@ const Appointments: React.FC = () => {
 
       {/* Create/Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-fade-in-up">
-             <div className="flex justify-between items-center p-6 border-b border-gray-100 sticky top-0 bg-white z-10">
-              <h3 className="text-xl font-black text-gray-800">{newApp.id ? 'Edit Appointment' : 'New Appointment'}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition"><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+             <div className="flex justify-between items-center p-6 border-b">
+              <h3 className="text-xl font-bold">{newApp.id ? 'Edit Appointment' : 'New Appointment'}</h3>
+              <button onClick={() => setIsModalOpen(false)}><X size={24} className="text-gray-400 hover:text-gray-600" /></button>
             </div>
-            <form onSubmit={handleSave} className="p-8 space-y-6">
+            <form onSubmit={handleSave} className="p-6 space-y-6">
               
               {/* Info Banner */}
               <div className="flex space-x-4">
-                <div className="flex-1 bg-blue-50 p-4 rounded-xl text-sm text-blue-800 flex items-center shadow-inner border border-blue-100">
-                  <Hash size={18} className="mr-3 text-blue-500" />
-                  <div>
-                    <span className="block text-xs font-bold uppercase text-blue-400">Queue Position</span>
-                    <span className="font-black text-lg">#{newApp.queueNumber || 'Auto'}</span>
-                  </div>
+                <div className="flex-1 bg-blue-50 p-3 rounded text-sm text-blue-800 flex items-center">
+                  <Hash size={16} className="mr-2" />
+                  Queue number: <span className="font-bold ml-1">{newApp.queueNumber || 'Auto-assigned'}</span>
                 </div>
                 {/* Emergency Override Toggle */}
-                <div 
-                  className={`flex-1 flex items-center p-4 rounded-xl border-2 cursor-pointer select-none transition-all ${overrideSchedule ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100 hover:border-gray-200'}`} 
-                  onClick={() => setOverrideSchedule(!overrideSchedule)}
-                >
-                   <div className={`w-5 h-5 rounded border flex items-center justify-center mr-3 ${overrideSchedule ? 'bg-red-500 border-red-500' : 'bg-white border-gray-300'}`}>
-                      {overrideSchedule && <CheckCircle size={14} className="text-white"/>}
-                   </div>
-                   <div>
-                      <span className={`block text-xs font-bold uppercase ${overrideSchedule ? 'text-red-500' : 'text-gray-400'}`}>Priority Mode</span>
-                      <span className={`font-bold text-sm ${overrideSchedule ? 'text-red-700' : 'text-gray-600'}`}>Force Override</span>
-                   </div>
+                <div className={`flex items-center p-3 rounded border cursor-pointer select-none transition-colors ${overrideSchedule ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`} onClick={() => setOverrideSchedule(!overrideSchedule)}>
+                   <input type="checkbox" checked={overrideSchedule} onChange={() => {}} className="mr-2 h-4 w-4 text-red-600 focus:ring-red-500 border-gray-300 rounded" />
+                   <span className={`text-sm font-medium ${overrideSchedule ? 'text-red-700' : 'text-gray-600'}`}>Emergency / Override Schedule</span>
                 </div>
               </div>
 
               {/* 1. People & Date */}
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Doctor</label>
+                   <label className="block text-sm font-medium mb-1 text-gray-700">Doctor</label>
                    {user?.role === Role.Doctor ? (
                      <input 
                        disabled 
                        value={doctors.find(d => d.id === user.relatedId)?.name || ''} 
-                       className="w-full border border-gray-200 p-2.5 rounded-lg bg-gray-100 text-gray-600 font-bold"
+                       className="w-full border p-2 rounded bg-gray-100 text-gray-700"
                      />
                    ) : (
                     <select required className={inputClass} value={newApp.doctorId || ''} onChange={e => setNewApp({...newApp, doctorId: e.target.value})}>
@@ -446,7 +437,7 @@ const Appointments: React.FC = () => {
                    )}
                 </div>
                 <div>
-                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Patient</label>
+                   <label className="block text-sm font-medium mb-1 text-gray-700">Patient</label>
                    <select required className={inputClass} value={newApp.patientId || ''} onChange={e => setNewApp({...newApp, patientId: e.target.value})}>
                      <option value="">Select Patient...</option>
                      {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -455,15 +446,15 @@ const Appointments: React.FC = () => {
               </div>
 
               {/* 2. Timing */}
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Date</label>
+                   <label className="block text-sm font-medium mb-1 text-gray-700">Date</label>
                    <input required type="date" className={inputClass} value={newApp.date || ''} onChange={e => setNewApp({...newApp, date: e.target.value})} />
                 </div>
                 <div>
-                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex justify-between">
+                   <label className="block text-sm font-medium mb-1 text-gray-700 flex justify-between">
                      Time Slot
-                     {overrideSchedule && <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-black">EMERGENCY</span>}
+                     {overrideSchedule && <span className="text-[10px] bg-red-100 text-red-600 px-1 rounded font-bold">EMERGENCY MODE</span>}
                    </label>
                    {availableSlots.length > 0 || newApp.id ? (
                       <select required className={inputClass} value={newApp.time || ''} onChange={e => setNewApp({...newApp, time: e.target.value})}>
@@ -473,20 +464,20 @@ const Appointments: React.FC = () => {
                         {newApp.id && newApp.time && !availableSlots.includes(newApp.time) && <option value={newApp.time}>{newApp.time}</option>}
                       </select>
                    ) : (
-                      <div className={`text-sm p-2.5 rounded-lg border flex items-center ${overrideSchedule ? 'bg-white border-gray-300' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                      <div className={`text-sm p-2 rounded border flex items-center ${overrideSchedule ? 'bg-white border-gray-300' : 'bg-red-50 text-red-600 border-red-200'}`}>
                         {!overrideSchedule && <AlertCircle size={16} className="mr-2 flex-shrink-0" />}
-                        <span className="font-medium">{slotStatus || 'Select Doctor & Date'}</span>
+                        <span>{slotStatus || 'Select Doctor & Date'}</span>
                       </div>
                    )}
                 </div>
               </div>
 
-              <div className="border-t border-dashed border-gray-200"></div>
+              <div className="border-t pt-4"></div>
 
               {/* 3. Type & Fees */}
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Visit Type</label>
+                    <label className="block text-sm font-medium mb-1 text-gray-700">Appointment Type</label>
                     <select 
                         className={inputClass} 
                         value={newApp.type} 
@@ -498,12 +489,12 @@ const Appointments: React.FC = () => {
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Total Fee</label>
+                    <label className="block text-sm font-medium mb-1 text-gray-700">Consultation Fee</label>
                     <div className="relative">
-                        <span className="absolute left-3 top-2.5 text-gray-400 font-bold text-xs">EGP</span>
+                        <span className="absolute left-3 top-2 text-gray-500">EGP</span>
                         <input 
                             type="number" 
-                            className={`${inputClass} pl-10 font-bold text-gray-800`} 
+                            className={`${inputClass} pl-12`} 
                             value={newApp.totalFee} 
                             onChange={e => setNewApp({...newApp, totalFee: Number(e.target.value)})} 
                         />
@@ -512,45 +503,43 @@ const Appointments: React.FC = () => {
               </div>
 
               {/* 4. Payment */}
-              <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
-                  <h4 className="font-bold text-gray-800 mb-4 text-xs uppercase tracking-wide flex items-center">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span> Payment Status
-                  </h4>
-                  <div className="grid grid-cols-2 gap-5">
+              <div className="bg-gray-50 p-4 rounded border border-gray-200">
+                  <h4 className="font-bold text-gray-800 mb-3 text-sm uppercase">Payment Details</h4>
+                  <div className="grid grid-cols-2 gap-4">
                       <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Amount Paid</label>
+                          <label className="block text-sm font-medium mb-1 text-gray-700">Amount Paid</label>
                           <div className="relative">
-                                <span className="absolute left-3 top-2.5 text-gray-400 font-bold text-xs">EGP</span>
+                                <span className="absolute left-3 top-2 text-gray-500">EGP</span>
                                 <input 
                                     type="number" 
-                                    className={`${inputClass} pl-10 font-bold text-emerald-700`} 
+                                    className={`${inputClass} pl-12`} 
                                     value={newApp.amountPaid} 
                                     onChange={e => setNewApp({...newApp, amountPaid: Number(e.target.value)})} 
                                 />
                           </div>
                       </div>
-                      <div className="flex items-end">
-                         <div className={`w-full p-2.5 rounded-lg text-center text-xs font-black uppercase tracking-widest border ${
-                            (newApp.amountPaid || 0) >= (newApp.totalFee || 0) && (newApp.totalFee || 0) > 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
-                            (newApp.amountPaid || 0) > 0 ? 'bg-orange-100 text-orange-700 border-orange-200' :
-                            'bg-gray-100 text-gray-400 border-gray-200'
+                      <div className="flex items-center">
+                         <div className={`w-full p-2 rounded text-center text-sm font-bold border ${
+                            (newApp.amountPaid || 0) >= (newApp.totalFee || 0) && (newApp.totalFee || 0) > 0 ? 'bg-green-100 text-green-700 border-green-300' :
+                            (newApp.amountPaid || 0) > 0 ? 'bg-orange-100 text-orange-700 border-orange-300' :
+                            'bg-gray-100 text-gray-500 border-gray-300'
                          }`}>
-                             {(newApp.amountPaid || 0) >= (newApp.totalFee || 0) && (newApp.totalFee || 0) > 0 ? 'Fully Settled' :
-                              (newApp.amountPaid || 0) > 0 ? `Partial (Due: ${formatCurrency((newApp.totalFee || 0) - (newApp.amountPaid || 0))})` :
-                              'Pending Payment'}
+                             {(newApp.amountPaid || 0) >= (newApp.totalFee || 0) && (newApp.totalFee || 0) > 0 ? 'FULLY PAID' :
+                              (newApp.amountPaid || 0) > 0 ? `PARTIAL (Due: ${formatCurrency((newApp.totalFee || 0) - (newApp.amountPaid || 0))})` :
+                              'PAYMENT PENDING'}
                          </div>
                       </div>
                   </div>
                   
                   {/* Partial Payment Reason */}
                   {(newApp.amountPaid || 0) > 0 && (newApp.amountPaid || 0) < (newApp.totalFee || 0) && (
-                      <div className="mt-4 animate-fade-in-up">
-                          <label className="block text-xs font-bold text-red-500 uppercase tracking-wider mb-2">Reason for Partial Payment</label>
+                      <div className="mt-3 animate-fade-in-up">
+                          <label className="block text-sm font-medium mb-1 text-red-600">Reason for Partial Payment (Required)</label>
                           <input 
                             required
                             type="text" 
-                            placeholder="e.g. Insurance pending, patient cash shortage..." 
-                            className={`${inputClass} border-red-200 focus:ring-red-500 bg-red-50`}
+                            placeholder="e.g. Insurance pending, patient didn't have cash..." 
+                            className={inputClass}
                             value={newApp.paymentNote || ''}
                             onChange={e => setNewApp({...newApp, paymentNote: e.target.value})}
                           />
@@ -559,13 +548,13 @@ const Appointments: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Clinical Notes</label>
-                <textarea className={inputClass} rows={2} value={newApp.notes || ''} onChange={e => setNewApp({...newApp, notes: e.target.value})} placeholder="Optional internal notes..." />
+                <label className="block text-sm font-medium mb-1 text-gray-700">Clinical Notes (Optional)</label>
+                <textarea className={inputClass} rows={2} value={newApp.notes || ''} onChange={e => setNewApp({...newApp, notes: e.target.value})} />
               </div>
 
-              <div className="flex justify-end pt-4 space-x-3 border-t border-gray-100">
-                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 text-gray-500 hover:bg-gray-100 rounded-xl font-bold transition">Cancel</button>
-                 <button type="submit" className="px-8 py-3 bg-primary text-white rounded-xl hover:bg-secondary font-bold shadow-lg shadow-primary/30 transition transform active:scale-95">Save Appointment</button>
+              <div className="flex justify-end pt-4 space-x-3">
+                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
+                 <button type="submit" className="px-4 py-2 bg-primary text-white rounded hover:bg-secondary">Save Appointment</button>
               </div>
             </form>
           </div>

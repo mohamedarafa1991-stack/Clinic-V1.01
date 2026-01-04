@@ -13,7 +13,6 @@
             colors: {
               primary: 'var(--color-primary)', 
               secondary: 'var(--color-secondary)', 
-              accent: '#f0fdfa', 
             }
           }
         }
@@ -24,37 +23,49 @@
         --color-primary: #0f766e;
         --color-secondary: #0d9488;
       }
-      /* Custom scrollbar for cleaner look */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+      
+      @media print {
+        .no-print { display: none !important; }
+        body { background: white !important; color: black !important; padding: 0 !important; }
+        .print-only { display: block !important; }
+        .card { border: 1px solid #ddd !important; box-shadow: none !important; }
       }
-      ::-webkit-scrollbar-track {
-        background: #f1f1f1;
+      
+      .print-only { display: none; }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #f1f1f1; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      
+      .animate-fade-in-up {
+        animation: fadeInUp 0.3s ease-out forwards;
       }
-      ::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8;
+      @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "date-fns": "https://esm.sh/date-fns@^4.1.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-router-dom": "https://esm.sh/react-router-dom@^7.11.0",
-    "recharts": "https://esm.sh/recharts@^3.6.0",
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0"
-  }
-}
-</script>
-</head>
+    <script type="importmap">
+    {
+      "imports": {
+        "date-fns": "https://esm.sh/date-fns@^4.1.0",
+        "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+        "react/": "https://esm.sh/react@^19.2.3/",
+        "react": "https://esm.sh/react@^19.2.3",
+        "react-router-dom": "https://esm.sh/react-router-dom@^7.11.0",
+        "recharts": "https://esm.sh/recharts@^3.6.0",
+        "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+        "jspdf": "https://esm.sh/jspdf@2.5.1",
+        "jspdf-autotable": "https://esm.sh/jspdf-autotable@3.5.28",
+        "xlsx": "https://esm.sh/xlsx@0.18.5"
+      }
+    }
+    </script>
+  </head>
   <body class="bg-gray-50 text-slate-800 antialiased">
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>
